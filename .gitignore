@@ -1,19 +1,86 @@
-# populate gitignore for python files and fastapi apps
-*.pyc
-__pycache__
-__pycache__/*
-*/__pycache__
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# populate gitignore for fastapi apps
-*.env
-*.ipynb
+# Virtual Environment
+venv/
+ENV/
+.env
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Database files
 *.db
 *.sqlite
+*.sqlite3
+
+# Logs
+logs/
 *.log
-*.json
+
+# Local configuration
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Package lock files
 *.lock
+package-lock.json
+yarn.lock
+
+# Media files
+*.mp4
+*.mov
+*.avi
+*.mkv
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Exclude data directory except sample data
+data/*
+!data/sample/
+
+# Compiled files
 *.pyd
 *.pyo
-*.mp4
+*.whl
 
+# Documentation builds
+docs/_build/
+site/
 
+# Test coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*,cover

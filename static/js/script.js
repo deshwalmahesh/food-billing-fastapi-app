@@ -1,15 +1,18 @@
+// Global variables
+let popupContainer;
+let items = [];
+let cartItems = [];
+
 document.addEventListener('DOMContentLoaded', function() {
     // DOM Elements
-    const orderForm = document.getElementById('order-form');
     const itemSelect = document.getElementById('item-select');
     const searchInput = document.querySelector('.search-form input[name="search"]');
     const searchResults = document.getElementById('search-results');
     const quantityInput = document.getElementById('quantity');
-    const priceDisplay = document.getElementById('price-display');
-    const summaryItem = document.getElementById('summary-item');
-    const summaryQuantity = document.getElementById('summary-quantity');
-    const summaryPricePerUnit = document.getElementById('summary-price-per-unit');
+    const cartItemsList = document.getElementById('cart-items-list');
+    const emptyCartMessage = document.getElementById('empty-cart-message');
     const summaryTotalPrice = document.getElementById('summary-total-price');
+    const addToCartBtn = document.getElementById('add-to-cart-btn');
     const paymentForms = document.querySelectorAll('.payment-form');
     const submitOrderBtn = document.getElementById('submit-order-btn');
     const paymentDoneBtn = document.getElementById('payment-done-btn');
@@ -22,17 +25,28 @@ document.addEventListener('DOMContentLoaded', function() {
     const sidebar = document.querySelector('.sidebar');
     
     // Create popup container if it doesn't exist
-    let popupContainer = document.getElementById('popup-container');
+    popupContainer = document.getElementById('popup-container');
     if (!popupContainer) {
         popupContainer = document.createElement('div');
         popupContainer.id = 'popup-container';
         document.body.appendChild(popupContainer);
     }
     
-    // Event Listeners
-    itemSelect.addEventListener('change', updateOrderSummary);
-    quantityInput.addEventListener('input', updateOrderSummary);
-    orderForm.addEventListener('submit', submitOrder);
+    // Initialize local cart items
+    cartItems = [];
+    
+    // Event Listeners - only add if elements exist
+    if (addToCartBtn) {
+        addToCartBtn.addEventListener('click', addToCart);
+    }
+    
+    if (submitOrderBtn) {
+        submitOrderBtn.addEventListener('click', submitOrder);
+    }
+    
+    if (paymentDoneBtn) {
+        paymentDoneBtn.addEventListener('click', submitOrderWithPayment);
+    }
     
     // Quantity buttons
     const decreaseBtn = document.querySelector('.quantity-btn.decrease');
@@ -57,12 +71,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Prevent manual deletion of quantity value
-    quantityInput.addEventListener('blur', function() {
-        if (!this.value || parseInt(this.value) < 1) {
-            this.value = 1;
-            updateOrderSummary();
-        }
-    });
+    if (quantityInput) {
+        quantityInput.addEventListener('blur', function() {
+            if (!this.value || parseInt(this.value) < 1) {
+                this.value = 1;
+                updateOrderSummary();
+            }
+        });
+    }
     
     // Add event listeners to all payment forms
     paymentForms.forEach(form => {
@@ -96,7 +112,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Sidebar toggle
-    if (sidebarToggle) {
+    if (sidebarToggle && sidebar) {
         sidebarToggle.addEventListener('click', function() {
             sidebar.classList.toggle('collapsed');
             document.querySelector('.main-container').classList.toggle('expanded');
@@ -105,26 +121,27 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Search input with debounce
     let debounceTimeout;
-    searchInput.addEventListener('input', function() {
-        clearTimeout(debounceTimeout);
-        const query = this.value.trim();
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(debounceTimeout);
+            const query = this.value.trim();
+            
+            if (query.length < 2) {
+                searchResults.classList.remove('active');
+                return;
+            }
+            
+            debounceTimeout = setTimeout(() => {
+                fetchSearchResults(query);
+            }, 300);
+        });
         
-        if (query.length < 2) {
-            searchResults.classList.remove('active');
-            return;
-        }
-        
-        debounceTimeout = setTimeout(() => {
-            fetchSearchResults(query);
-        }, 300); // 300ms debounce
-    });
-    
-    // Hide search results when clicking outside
-    document.addEventListener('click', function(e) {
-        if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
-            searchResults.classList.remove('active');
-        }
-    });
+        document.addEventListener('click', function(e) {
+            if (!searchInput.contains(e.target) && searchResults && !searchResults.contains(e.target)) {
+                searchResults.classList.remove('active');
+            }
+        });
+    }
     
     // Function to fetch search results
     function fetchSearchResults(query) {
@@ -182,23 +199,159 @@ document.addEventListener('DOMContentLoaded', function() {
         searchInput.value = '';
     }
     
-    // Item data
-    let items = [];
-    
     // Fetch all items on page load
-    fetch('/api/items')
-        .then(response => response.json())
-        .then(data => {
-            items = data;
-            // Initialize order summary if an item is already selected
-            if (itemSelect.value) {
-                updateOrderSummary();
-            }
-        })
-        .catch(error => console.error('Error fetching items:', error));
+    if (itemSelect) {
+        fetch('/api/items')
+            .then(response => response.json())
+            .then(data => {
+                items = data;
+                console.log('Items loaded:', items.length);
+                
+                // Initialize the order summary if an item is selected
+                if (itemSelect.value) {
+                    updateOrderSummary();
+                }
+            })
+            .catch(error => console.error('Error fetching items:', error));
+    }
     
+    // Add item to cart functionality
+    function addToCart() {
+        if (!itemSelect || !quantityInput) {
+            console.error('Required DOM elements not found');
+            return;
+        }
+        
+        const selectedItemId = itemSelect.value;
+        if (!selectedItemId) {
+            showAlert('Please select an item first', 'red');
+            return;
+        }
+        
+        // Make sure items are loaded
+        if (!items || items.length === 0) {
+            showAlert('Loading items, please try again in a moment', 'red');
+            return;
+        }
+        
+        const quantity = parseInt(quantityInput.value) || 1;
+        if (quantity <= 0) {
+            showAlert('Quantity must be greater than 0', 'red');
+            return;
+        }
+        
+        const selectedOption = itemSelect.options[itemSelect.selectedIndex];
+        if (!selectedOption || !selectedOption.dataset) {
+            showAlert('Error getting item details', 'red');
+            return;
+        }
+        
+        const itemName = selectedOption.dataset.name;
+        const unitPrice = parseFloat(selectedOption.dataset.price);
+        const stock = parseInt(selectedOption.dataset.stock);
+        
+        if (!itemName || isNaN(unitPrice)) {
+            showAlert('Invalid item data', 'red');
+            return;
+        }
+        
+        // Check if there's enough stock
+        if (stock !== null && stock !== undefined && stock < quantity) {
+            showAlert(`Not enough stock. Only ${stock} available.`, 'red');
+            return;
+        }
+        
+        // Check if item already exists in cart
+        const existingItemIndex = cartItems.findIndex(item => item.itemId == selectedItemId);
+        
+        if (existingItemIndex !== -1) {
+            // Update existing item quantity
+            cartItems[existingItemIndex].quantity += quantity;
+            cartItems[existingItemIndex].subtotal = cartItems[existingItemIndex].quantity * cartItems[existingItemIndex].unitPrice;
+        } else {
+            // Add new item to cart
+            cartItems.push({
+                itemId: selectedItemId,
+                itemName: itemName,
+                quantity: quantity,
+                unitPrice: unitPrice,
+                subtotal: unitPrice * quantity
+            });
+        }
+        
+        // Update cart display
+        updateCartDisplay();
+        
+        // Show success message
+        showAlert('Item added to cart', 'green');
+        
+        // Reset form
+        quantityInput.value = 1;
+        itemSelect.selectedIndex = 0;
+        
+        showAlert('Item added to cart', 'green');
+    }
+
+    // Update cart display
+    function updateCartDisplay() {
+        // Clear cart items list
+        cartItemsList.innerHTML = '';
+        
+        if (cartItems.length === 0) {
+            emptyCartMessage.style.display = 'block';
+            summaryTotalPrice.textContent = '0.00';
+            return;
+        }
+        
+        emptyCartMessage.style.display = 'none';
+        
+        // Calculate total price
+        let totalPrice = 0;
+        
+        // Add each item to the cart display
+        cartItems.forEach((item, index) => {
+            const cartItemElement = document.createElement('div');
+            cartItemElement.className = 'cart-item';
+            
+            const cartItemInfo = document.createElement('div');
+            cartItemInfo.className = 'cart-item-info';
+            cartItemInfo.innerHTML = `
+                <p><strong>${item.itemName}</strong></p>
+                <p>${item.quantity} x ₹${item.unitPrice.toFixed(2)} = ₹${item.subtotal.toFixed(2)}</p>
+            `;
+            
+            const cartItemActions = document.createElement('div');
+            cartItemActions.className = 'cart-item-actions';
+            
+            const removeButton = document.createElement('button');
+            removeButton.className = 'remove-item-btn';
+            removeButton.textContent = 'Remove';
+            removeButton.addEventListener('click', () => removeFromCart(index));
+            
+            cartItemActions.appendChild(removeButton);
+            cartItemElement.appendChild(cartItemInfo);
+            cartItemElement.appendChild(cartItemActions);
+            
+            cartItemsList.appendChild(cartItemElement);
+            
+            totalPrice += item.subtotal;
+        });
+        
+        // Update total price
+        summaryTotalPrice.textContent = totalPrice.toFixed(2);
+    }
+
+    // Remove item from cart
+    function removeFromCart(index) {
+        cartItems.splice(index, 1);
+        updateCartDisplay();
+        showAlert('Item removed from cart', 'gray');
+    };
+
     // Update order summary functionality
     function updateOrderSummary() {
+        if (!itemSelect || !quantityInput) return;
+        
         const itemId = itemSelect.value;
         
         // If quantity is empty, set it to 1
@@ -206,102 +359,114 @@ document.addEventListener('DOMContentLoaded', function() {
             quantityInput.value = 1;
         }
         
-        const quantity = quantityInput.value;
+        const quantity = parseInt(quantityInput.value) || 1;
         
         if (!itemId) {
+            if (summaryTotalPrice) summaryTotalPrice.textContent = '0.00';
+            return;
+        }
+        
+        // Make sure items are loaded
+        if (!items || items.length === 0) {
+            console.log('Items not loaded yet');
             return;
         }
         
         // Find the selected item
         const selectedItem = items.find(item => item.id == itemId);
         if (!selectedItem) {
+            console.log('Selected item not found:', itemId);
             return;
         }
         
-        // Update the order summary
-        summaryItem.textContent = selectedItem.item_name;
-        summaryQuantity.textContent = quantity;
-        summaryPricePerUnit.textContent = selectedItem.price_per_quantity.toFixed(2);
-        
+        // Calculate total price
         const totalPrice = selectedItem.price_per_quantity * quantity;
-        summaryTotalPrice.textContent = totalPrice.toFixed(2);
+        
+        // Update the summary total price if the element exists
+        if (summaryTotalPrice) {
+            summaryTotalPrice.textContent = totalPrice.toFixed(2);
+        }
     }
     
     // Submit order functionality
-    function submitOrder(e) {
-        e.preventDefault();
-        
-        const itemId = itemSelect.value;
-        let quantity = quantityInput.value;
-        
-        if (!itemId) {
-            showAlert('Please select an item', 'red');
+    function submitOrder() {
+        if (cartItems.length === 0) {
+            showAlert('Your cart is empty. Please add items to your order.', 'red');
             return;
         }
         
-        // Set quantity to 1 if it's not valid
-        if (!quantity || quantity < 1) {
-            quantity = 1;
-            quantityInput.value = 1;
+        createOrder('pending');
+    }
+
+    // Submit order with payment
+    function submitOrderWithPayment() {
+        if (cartItems.length === 0) {
+            showAlert('Your cart is empty. Please add items to your order.', 'red');
+            return;
         }
         
-        // Get the button that was clicked
-        const clickedButton = document.activeElement;
-        const paymentStatus = clickedButton.value;
-        const selectedItem = items.find(item => item.id == itemId);
-        
-        // Prepare confirmation message and color
-        let title, message, color;
-        if (paymentStatus === 'completed') {
-            title = 'Order With Payment';
-            message = `Are you sure you want to place an order for ${quantity} ${selectedItem.item_name}(s) with payment?`;
-            color = 'green';
-        } else {
-            title = 'Order Without Payment';
-            message = `Are you sure you want to place an order for ${quantity} ${selectedItem.item_name}(s) without payment?`;
-            color = 'red';
-        }
+        createOrder('completed');
+    }
+
+    // Create order with API
+    function createOrder(paymentStatus) {
+        // Prepare order data
+        const orderData = {
+            items: cartItems.map(item => ({
+                item_id: parseInt(item.itemId),
+                quantity: item.quantity
+            })),
+            payment_status: paymentStatus
+        };
         
         // Show confirmation popup
+        const title = paymentStatus === 'completed' ? 'Confirm Order with Payment' : 'Confirm Order';
+        const message = `Are you sure you want to place an order with ${cartItems.length} item(s)?`;
+        const color = paymentStatus === 'completed' ? 'green' : 'red';
+        
         showConfirmationPopup(title, message, color, () => {
-            // Create form data manually to ensure all fields are included
-            const formData = new FormData();
-            formData.append('item_id', itemId);
-            formData.append('quantity', quantity);
-            formData.append('payment_status', paymentStatus);
-            
+            // Submit order
             fetch('/api/create-order', {
                 method: 'POST',
-                body: formData
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(orderData)
             })
             .then(response => {
                 if (!response.ok) {
-                    if (response.status === 422) {
-                        return response.json().then(err => { 
-                            console.error('Validation error:', err);
-                            throw new Error('Form validation error. Check that all required fields are provided.');
-                        });
-                    }
-                    return response.json().then(err => { throw new Error(err.detail || 'Error creating order'); });
+                    return response.json().then(data => {
+                        throw new Error(data.detail || 'Failed to create order');
+                    });
                 }
-                return response;
+                return response.json();
             })
-            .then(() => {
-                // Show success message before redirecting
-                showAlert(`Order for ${quantity} ${selectedItem.item_name}(s) placed successfully!`, 'green');
+            .then(data => {
+                // Show success message
+                const successMessage = paymentStatus === 'completed' 
+                    ? 'Order placed successfully with payment!' 
+                    : 'Order placed successfully without payment!';
+                
+                showAlert(successMessage, color);
+                
+                // Reset cart
+                cartItems = [];
+                updateCartDisplay();
+                
+                // Reload page after a short delay
                 setTimeout(() => {
-                    window.location.href = '/';
+                    window.location.reload();
                 }, 1500);
             })
             .catch(error => {
+                console.error('Error creating order:', error);
                 showAlert(error.message, 'red');
-                console.error('Error:', error);
             });
         });
     }
     
     // Initialize the order summary on page load
-    if (itemSelect.value) {
+    if (itemSelect && itemSelect.value) {
         updateOrderSummary();
     }
     
@@ -321,82 +486,17 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Keep sidebar expanded by default
+    // Keep sidebar expanded by default inside DOMContentLoaded
     if (sidebar) {
         sidebar.classList.remove('collapsed');
         document.querySelector('.main-container').classList.remove('expanded');
     }
     
-    // Function to show confirmation popup
-    function showConfirmationPopup(title, message, color, onConfirm) {
-        const popup = document.createElement('div');
-        popup.className = 'popup';
-        
-        const popupContent = document.createElement('div');
-        popupContent.className = `popup-content ${color}`;
-        
-        const popupHeader = document.createElement('div');
-        popupHeader.className = 'popup-header';
-        popupHeader.innerHTML = `<h3>${title}</h3>`;
-        
-        const popupBody = document.createElement('div');
-        popupBody.className = 'popup-body';
-        popupBody.innerHTML = `<p>${message}</p>`;
-        
-        const popupFooter = document.createElement('div');
-        popupFooter.className = 'popup-footer';
-        
-        const confirmButton = document.createElement('button');
-        confirmButton.className = `btn-${color}`;
-        confirmButton.textContent = 'Confirm';
-        confirmButton.addEventListener('click', () => {
-            popupContainer.removeChild(popup);
-            if (onConfirm) onConfirm();
-        });
-        
-        const cancelButton = document.createElement('button');
-        cancelButton.className = 'btn-gray';
-        cancelButton.textContent = 'Cancel';
-        cancelButton.addEventListener('click', () => {
-            popupContainer.removeChild(popup);
-        });
-        
-        popupFooter.appendChild(confirmButton);
-        popupFooter.appendChild(cancelButton);
-        
-        popupContent.appendChild(popupHeader);
-        popupContent.appendChild(popupBody);
-        popupContent.appendChild(popupFooter);
-        
-        popup.appendChild(popupContent);
-        popupContainer.appendChild(popup);
-    }
-    
-    // Function to show alert popup
-    function showAlert(message, color) {
-        const popup = document.createElement('div');
-        popup.className = 'popup alert';
-        
-        const popupContent = document.createElement('div');
-        popupContent.className = `popup-content ${color}`;
-        
-        const popupBody = document.createElement('div');
-        popupBody.className = 'popup-body';
-        popupBody.innerHTML = `<p>${message}</p>`;
-        
-        popupContent.appendChild(popupBody);
-        popup.appendChild(popupContent);
-        
-        popupContainer.appendChild(popup);
-        
-        // Auto-dismiss after 3 seconds
-        setTimeout(() => {
-            if (popupContainer.contains(popup)) {
-                popupContainer.removeChild(popup);
-            }
-        }, 3000);
-    }
+    // Use the global showConfirmationPopup and showAlert functions
 });
+
+// Get sidebar element
+const sidebar = document.querySelector('.sidebar');
 
 // Keep sidebar expanded by default
 if (sidebar) {
@@ -404,14 +504,18 @@ if (sidebar) {
     document.querySelector('.main-container').classList.remove('expanded');
 }
 
-// Initialize with collapsed sidebar on mobile
-if (sidebar) {
-    sidebar.classList.remove('collapsed');
-    document.querySelector('.main-container').classList.remove('expanded');
-}
-
 // Function to show confirmation popup
 function showConfirmationPopup(title, message, color, onConfirm) {
+    // Get the popup container if it doesn't exist yet
+    if (!popupContainer) {
+        popupContainer = document.getElementById('popup-container');
+        if (!popupContainer) {
+            popupContainer = document.createElement('div');
+            popupContainer.id = 'popup-container';
+            document.body.appendChild(popupContainer);
+        }
+    }
+    
     const popup = document.createElement('div');
     popup.className = 'popup';
 
@@ -457,6 +561,16 @@ function showConfirmationPopup(title, message, color, onConfirm) {
 
 // Function to show alert popup
 function showAlert(message, color) {
+    // Get the popup container if it doesn't exist yet
+    if (!popupContainer) {
+        popupContainer = document.getElementById('popup-container');
+        if (!popupContainer) {
+            popupContainer = document.createElement('div');
+            popupContainer.id = 'popup-container';
+            document.body.appendChild(popupContainer);
+        }
+    }
+    
     const popup = document.createElement('div');
     popup.className = 'popup alert';
 
@@ -474,7 +588,7 @@ function showAlert(message, color) {
 
     // Auto-dismiss after 3 seconds
     setTimeout(() => {
-        if (popupContainer.contains(popup)) {
+        if (popupContainer && popupContainer.contains(popup)) {
             popupContainer.removeChild(popup);
         }
     }, 3000);

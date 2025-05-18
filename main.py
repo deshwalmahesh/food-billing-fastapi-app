@@ -6,7 +6,14 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import uvicorn
 import database as db
-from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+# Import Pydantic schemas
+from schemas import (
+    ItemBase, ItemCreate, ItemUpdate, ItemResponse,
+    OrderBase, OrderCreate, OrderResponse,
+    OrderItemBase, OrderItemCreate, OrderItemUpdate, OrderItemResponse
+)
 
 app = FastAPI(title="Billing App")
 
@@ -15,31 +22,21 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Templates
 templates = Jinja2Templates(directory="templates")
-
-# Pydantic models
-class ItemCreate(BaseModel):
-    item_name: str
-    price_per_quantity: float
-    remaining_quantity: Optional[int] = None
-
-class ItemUpdate(BaseModel):
-    item_name: str
-    price_per_quantity: float
-    remaining_quantity: Optional[int] = None
+# Routes
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request, search: str = ""):
+async def home(request: Request, search: str = "", db_session: Session = Depends(db.get_db)):
     # Always get all orders
-    completed_orders = db.get_completed_orders()
-    pending_orders = db.get_pending_orders()
-    order_history = db.get_order_history()
+    completed_orders = db.get_completed_orders(db_session)
+    pending_orders = db.get_pending_orders(db_session)
+    order_history = db.get_order_history(db_session)
     
     # If search query is provided, filter items
     if search:
-        items = db.search_items(search)
+        items = db.search_items(search, db_session)
     else:
-        items = db.get_all_items()
+        items = db.get_all_items(db_session)
     
     return templates.TemplateResponse(
         "index.html",
@@ -54,72 +51,88 @@ async def home(request: Request, search: str = ""):
     )
 
 @app.get("/api/items", response_class=JSONResponse)
-async def get_items(search: str = Query(None)):
+async def get_items(search: str = Query(None), db_session: Session = Depends(db.get_db)):
     if search:
-        items = db.search_items(search)
+        items = db.search_items(search, db_session)
     else:
-        items = db.get_all_items()
+        items = db.get_all_items(db_session)
     return items
 
 @app.get("/api/orders", response_class=JSONResponse)
-async def get_orders():
-    orders = db.get_all_orders()
+async def get_orders(db_session: Session = Depends(db.get_db)):
+    orders = db.get_all_orders(db_session)
     return orders
-
 
 @app.post("/api/create-order")
 async def create_order(
-    item_id: int = Form(...),
-    quantity: int = Form(...),
-    payment_status: str = Form(...)
+    order: OrderCreate,
+    db_session: Session = Depends(db.get_db)
 ):
-    item = db.get_item_by_id(item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    if not order.items:
+        raise HTTPException(status_code=400, detail="Order must contain at least one item")
     
-    if item["remaining_quantity"] is not None:
-        if item["remaining_quantity"] < quantity:
-            raise HTTPException(status_code=400, detail=f"Not enough stock. Only {item['remaining_quantity']} available.")
+    # Prepare items for the order
+    order_items = []
+    
+    for order_item in order.items:
+        item = db.get_item_by_id(order_item.item_id, db_session)
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item with ID {order_item.item_id} not found")
         
-        # Update remaining quantity
-        db.update_item_quantity(item_id, -quantity)
+        # Check inventory
+        if item.remaining_quantity is not None:
+            if item.remaining_quantity < order_item.quantity:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Not enough stock for {item.item_name}. Only {item.remaining_quantity} available."
+                )
+            
+            # Update remaining quantity
+            db.update_item_quantity(order_item.item_id, -order_item.quantity, db_session)
+        
+        # Add to order items list
+        subtotal = item.price_per_quantity * order_item.quantity
+        order_items.append({
+            "item_id": order_item.item_id,
+            "item_name": item.item_name,
+            "quantity": order_item.quantity,
+            "unit_price": item.price_per_quantity,
+            "subtotal": subtotal
+        })
     
     # Create new order
-    total_price = item["price_per_quantity"] * quantity
     order_id = db.create_order(
-        item_id=item_id,
-        item_name=item["item_name"],
-        quantity=quantity,
-        price=total_price,
-        payment_status=payment_status
+        items=order_items,
+        payment_status=order.payment_status,
+        db=db_session
     )
     
-    return RedirectResponse(url="/", status_code=303)
+    return {"order_id": order_id, "success": True}
 
 @app.post("/api/update-payment-status/{order_id}")
-async def update_payment_status(order_id: int):
-    order = db.get_order_by_id(order_id)
+async def update_payment_status(order_id: int, db_session: Session = Depends(db.get_db)):
+    order = db.get_order_by_id(order_id, db_session)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    db.update_payment_status(order_id)
+    db.update_payment_status(order_id, db=db_session)
     return RedirectResponse(url="/", status_code=303)
 
 @app.post("/api/cancel-order/{order_id}")
-async def cancel_order(order_id: int):
-    order = db.get_order_by_id(order_id)
+async def cancel_order(order_id: int, db_session: Session = Depends(db.get_db)):
+    order = db.get_order_by_id(order_id, db_session)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    success = db.cancel_order(order_id)
+    success = db.cancel_order(order_id, db_session)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to cancel order")
     
     return RedirectResponse(url="/", status_code=303)
 
 @app.get("/api/search-items")
-async def search_items(query: str = Query(...)):
-    items = db.search_items(query)
+async def search_items(query: str = Query(...), db_session: Session = Depends(db.get_db)):
+    items = db.search_items(query, db_session)
     return items
 
 @app.get("/search-orders", response_class=HTMLResponse)
@@ -142,7 +155,8 @@ async def search_orders(
     payment_date_start: Optional[str] = Query(None),
     payment_date_end: Optional[str] = Query(None),
     sort_by: Optional[str] = Query("order_date"),
-    sort_order: Optional[str] = Query("desc")
+    sort_order: Optional[str] = Query("desc"),
+    db_session: Session = Depends(db.get_db)
 ):
     # Call the database search function
     orders = db.search_orders(
@@ -153,24 +167,29 @@ async def search_orders(
         order_date_start=order_date_start,
         order_date_end=order_date_end,
         payment_date_start=payment_date_start,
-        payment_date_end=payment_date_end
+        payment_date_end=payment_date_end,
+        db=db_session
     )
     
-    # Handle sorting (since SQLite might not handle complex sorting well)
-    if sort_by and sort_by in ["id", "item_name", "quantity", "price", "order_date", "payment_date"]:
-        reverse = sort_order.lower() == "desc"
-        if sort_by in ["quantity", "price", "id"]:
-            orders = sorted(orders, key=lambda x: float(x[sort_by]) if x[sort_by] is not None else 0, reverse=reverse)
-        else:
-            orders = sorted(orders, key=lambda x: x[sort_by] if x[sort_by] is not None else "", reverse=reverse)
+    # With Pydantic models, the items are already included in the order response
+    # Convert to dict for consistency with the rest of the API
+    enhanced_orders = [order.model_dump() for order in orders]
     
-    return orders
+    # Handle sorting (since SQLite might not handle complex sorting well)
+    if sort_by and sort_by in ["id", "item_name", "quantity", "price", "order_date", "payment_date", "total_price"]:
+        reverse = sort_order.lower() == "desc"
+        if sort_by in ["quantity", "price", "id", "total_price"]:
+            enhanced_orders = sorted(enhanced_orders, key=lambda x: float(x.get(sort_by, 0)) if x.get(sort_by) is not None else 0, reverse=reverse)
+        else:
+            enhanced_orders = sorted(enhanced_orders, key=lambda x: x.get(sort_by, "") if x.get(sort_by) is not None else "", reverse=reverse)
+    
+    return enhanced_orders
 
 # Inventory Management Routes
 @app.get("/inventory", response_class=HTMLResponse)
-async def inventory_page(request: Request):
-    items = db.get_all_items()
-    order_history = db.get_order_history()
+async def inventory_page(request: Request, db_session: Session = Depends(db.get_db)):
+    items = db.get_all_items(db_session)
+    order_history = db.get_order_history(db_session)
     
     return templates.TemplateResponse(
         "inventory.html",
@@ -182,27 +201,28 @@ async def inventory_page(request: Request):
     )
 
 @app.get("/api/items/{item_id}", response_class=JSONResponse)
-async def get_item(item_id: int):
-    item = db.get_item_by_id(item_id)
+async def get_item(item_id: int, db_session: Session = Depends(db.get_db)):
+    item = db.get_item_by_id(item_id, db_session)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     return item
 
 @app.post("/api/items", response_class=JSONResponse)
-async def create_item(item: ItemCreate):
+async def create_item(item: ItemCreate, db_session: Session = Depends(db.get_db)):
     try:
         item_id = db.add_item(
             item_name=item.item_name,
             price_per_quantity=item.price_per_quantity,
-            remaining_quantity=item.remaining_quantity
+            remaining_quantity=item.remaining_quantity,
+            db=db_session
         )
         return {"id": item_id, "success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.put("/api/items/{item_id}", response_class=JSONResponse)
-async def update_item(item_id: int, item: ItemUpdate):
-    existing_item = db.get_item_by_id(item_id)
+async def update_item(item_id: int, item: ItemUpdate, db_session: Session = Depends(db.get_db)):
+    existing_item = db.get_item_by_id(item_id, db_session)
     if not existing_item:
         raise HTTPException(status_code=404, detail="Item not found")
     
@@ -211,28 +231,112 @@ async def update_item(item_id: int, item: ItemUpdate):
             item_id=item_id,
             item_name=item.item_name,
             price_per_quantity=item.price_per_quantity,
-            remaining_quantity=item.remaining_quantity
+            remaining_quantity=item.remaining_quantity,
+            db=db_session
         )
         return {"success": success}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.delete("/api/items/{item_id}", response_class=JSONResponse)
-async def delete_item(item_id: int):
-    existing_item = db.get_item_by_id(item_id)
+async def delete_item(item_id: int, db_session: Session = Depends(db.get_db)):
+    existing_item = db.get_item_by_id(item_id, db_session)
     if not existing_item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    success = db.delete_item(item_id)
+    success = db.delete_item(item_id, db_session)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot delete item with existing orders")
     
     return {"success": True}
 
 @app.post("/api/restock-all", response_class=JSONResponse)
-async def restock_all():
-    success = db.restock_all_items(quantity=9999)
+async def restock_all(db_session: Session = Depends(db.get_db)):
+    success = db.restock_all_items(quantity=9999, db=db_session)
     return {"success": success}
+
+@app.post("/api/orders/{order_id}/items")
+async def add_item_to_order(
+    order_id: int,
+    order_item: OrderItemCreate,
+    db_session: Session = Depends(db.get_db)
+):
+    success, message = db.add_item_to_order(
+        order_id=order_id,
+        item_id=order_item.item_id,
+        quantity=order_item.quantity,
+        db=db_session
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"success": True, "message": message}
+
+@app.delete("/api/orders/{order_id}/items/{order_item_id}")
+async def remove_item_from_order(
+    order_id: int,
+    order_item_id: int,
+    db_session: Session = Depends(db.get_db)
+):
+    success, message = db.remove_item_from_order(
+        order_id=order_id,
+        order_item_id=order_item_id,
+        db=db_session
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"success": True, "message": message}
+
+@app.put("/api/orders/{order_id}/items/{order_item_id}")
+async def update_order_item(
+    order_id: int,
+    order_item_id: int,
+    order_item: OrderItemUpdate,
+    db_session: Session = Depends(db.get_db)
+):
+    success, message = db.update_order_item_quantity(
+        order_id=order_id,
+        order_item_id=order_item_id,
+        new_quantity=order_item.quantity,
+        db=db_session
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"success": True, "message": message}
+
+@app.get("/api/orders/{order_id}/items")
+async def get_order_items(
+    order_id: int,
+    db_session: Session = Depends(db.get_db)
+):
+    # Check if order exists
+    order = db.get_order_by_id(order_id, db_session)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    order_items = db.get_order_items(order_id, db_session)
+    return order_items
+
+@app.post("/api/create-order-form")
+async def create_order_form(
+    item_id: int = Form(...),
+    quantity: int = Form(...),
+    payment_status: str = Form(...),
+    db_session: Session = Depends(db.get_db)
+):
+    # Create an order with a single item (for backward compatibility with the form)
+    order = OrderCreate(
+        items=[OrderItemCreate(item_id=item_id, quantity=quantity)],
+        payment_status=payment_status
+    )
+    
+    result = await create_order(order, db_session)
+    return RedirectResponse(url="/", status_code=303)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
