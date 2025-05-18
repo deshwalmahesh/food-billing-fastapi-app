@@ -1,0 +1,16 @@
+# populate gitignore for python files and fastapi apps
+*.pyc
+__pycache__
+
+# populate gitignore for fastapi apps
+*.env
+*.ipynb
+*.db
+*.sqlite
+*.log
+*.json
+*.lock
+*.pyd
+*.pyo
+
+
