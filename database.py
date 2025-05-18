@@ -3,13 +3,16 @@ import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, joinedload
 from sqlalchemy.pool import QueuePool
 from dotenv import load_dotenv
 from fastapi import Depends
 
 # Import models from models.py
-from models import Base, Item, Order
+from models import Base, Item, Order, OrderItem
+
+# Import Pydantic schemas
+from schemas import ItemResponse, OrderResponse, OrderItemResponse
 
 # Load environment variables
 load_dotenv()
@@ -55,7 +58,7 @@ def init_db():
 # Item operations
 def get_all_items(db: Session = Depends(get_db)):
     items = db.query(Item).order_by(Item.item_name).all()
-    return [item.to_dict() for item in items]
+    return [ItemResponse.model_validate(item) for item in items]
 
 def add_item(item_name: str, price_per_quantity: float, remaining_quantity: Optional[int] = None, db: Session = Depends(get_db)):
     """Add a new item to the database"""
@@ -84,9 +87,9 @@ def update_item(item_id: int, item_name: str, price_per_quantity: float, remaini
 
 def delete_item(item_id: int, db: Session = Depends(get_db)):
     """Delete an item from the database"""
-    # Check if item exists in any orders
-    order_count = db.query(Order).filter(Order.item_id == item_id).count()
-    if order_count > 0:
+    # Check if item exists in any order items
+    order_item_count = db.query(OrderItem).filter(OrderItem.item_id == item_id).count()
+    if order_item_count > 0:
         return False
     
     # Delete the item
@@ -106,15 +109,15 @@ def restock_all_items(quantity: int = 9999, db: Session = Depends(get_db)):
 
 def get_item_by_id(item_id: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
-    return item.to_dict() if item else None
+    return ItemResponse.model_validate(item) if item else None
 
 def get_item_by_name(item_name: str, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.item_name == item_name).first()
-    return item.to_dict() if item else None
+    return ItemResponse.model_validate(item) if item else None
 
 def search_items(query: str, db: Session = Depends(get_db)):
     items = db.query(Item).filter(Item.item_name.ilike(f"%{query}%")).all()
-    return [item.to_dict() for item in items]
+    return [ItemResponse.model_validate(item) for item in items]
 
 def update_item_quantity(item_id: int, quantity_change: int, db: Session = Depends(get_db)):
     item = db.query(Item).filter(Item.id == item_id).first()
@@ -127,40 +130,102 @@ def update_item_quantity(item_id: int, quantity_change: int, db: Session = Depen
 
 # Order operations
 def get_all_orders(db: Session = Depends(get_db)):
-    orders = db.query(Order).all()
-    return [order.to_dict() for order in orders]
+    orders = db.query(Order).options(joinedload(Order.order_items)).order_by(Order.order_date.desc()).all()
+    
+    # Explicitly create OrderResponse objects with items
+    result = []
+    for order in orders:
+        items = [OrderItemResponse.model_validate(item) for item in order.order_items]
+        order_dict = OrderResponse.model_validate(order)
+        order_dict.items = items
+        result.append(order_dict)
+    
+    return result
 
 def get_order_history(db: Session = Depends(get_db)):
     """Get all orders for history view, sorted by newest first"""
-    return get_all_orders(db)
+    orders = db.query(Order).options(joinedload(Order.order_items)).order_by(Order.order_date.desc()).all()
+    
+    # Explicitly create OrderResponse objects with items
+    result = []
+    for order in orders:
+        items = [OrderItemResponse.model_validate(item) for item in order.order_items]
+        order_dict = OrderResponse.model_validate(order)
+        order_dict.items = items
+        result.append(order_dict)
+    
+    return result
 
 def get_completed_orders(db: Session = Depends(get_db)):
-    orders = db.query(Order).filter(Order.payment_status == "completed").order_by(Order.order_date.desc()).all()
-    return [order.to_dict() for order in orders]
+    orders = db.query(Order).options(joinedload(Order.order_items)).filter(Order.payment_status == "completed").order_by(Order.payment_date.desc()).all()
+    
+    # Explicitly create OrderResponse objects with items
+    result = []
+    for order in orders:
+        items = [OrderItemResponse.model_validate(item) for item in order.order_items]
+        order_dict = OrderResponse.model_validate(order)
+        order_dict.items = items
+        result.append(order_dict)
+    
+    return result
 
 def get_pending_orders(db: Session = Depends(get_db)):
-    orders = db.query(Order).filter(Order.payment_status == "pending").order_by(Order.order_date.asc()).all()
-    return [order.to_dict() for order in orders]
+    orders = db.query(Order).options(joinedload(Order.order_items)).filter(Order.payment_status == "pending").order_by(Order.order_date.asc()).all()
+    
+    # Explicitly create OrderResponse objects with items
+    result = []
+    for order in orders:
+        items = [OrderItemResponse.model_validate(item) for item in order.order_items]
+        order_dict = OrderResponse.model_validate(order)
+        order_dict.items = items
+        result.append(order_dict)
+    
+    return result
 
 def get_order_by_id(order_id: int, db: Session = Depends(get_db)):
-    order = db.query(Order).filter(Order.id == order_id).first()
-    return order.to_dict() if order else None
+    order = db.query(Order).options(joinedload(Order.order_items)).filter(Order.id == order_id).first()
+    
+    if not order:
+        return None
+    
+    # Explicitly create OrderResponse object with items
+    items = [OrderItemResponse.model_validate(item) for item in order.order_items]
+    order_dict = OrderResponse.model_validate(order)
+    order_dict.items = items
+    
+    return order_dict
 
-def create_order(item_id: int, item_name: str, quantity: int, price: float, payment_status: str, db: Session = Depends(get_db)):
+def create_order(items: List[Dict], payment_status: str, db: Session = Depends(get_db)):
+    """Create a new order with multiple items"""
     order_date = datetime.now().isoformat()
     payment_date = order_date if payment_status == "completed" else None
     
+    # Calculate total price from all items
+    total_price = sum(item["subtotal"] for item in items)
+    
+    # Create the order
     order = Order(
-        item_id=item_id,
-        item_name=item_name,
-        quantity=quantity,
-        price=price,
+        total_price=total_price,
         payment_status=payment_status,
         order_date=order_date,
         payment_date=payment_date
     )
     
     db.add(order)
+    db.flush()  # Get the order ID without committing
+    
+    # Add order items
+    for item_data in items:
+        order_item = OrderItem(
+            order_id=order.id,
+            item_id=item_data["item_id"],
+            item_name=item_data["item_name"],
+            quantity=item_data["quantity"],
+            unit_price=item_data["unit_price"],
+            subtotal=item_data["subtotal"]
+        )
+        db.add(order_item)
+    
     db.commit()
     db.refresh(order)
     return order.id
@@ -183,13 +248,15 @@ def cancel_order(order_id: int, db: Session = Depends(get_db)):
     if not order:
         return False
     
-    # Get the item to check if it has remaining_quantity tracking
-    item = db.query(Item).filter(Item.id == order.item_id).first()
+    # Get all order items
+    order_items = db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
     
-    # If the item tracks quantity, restore it
-    if item and item.remaining_quantity is not None:
-        # Add the quantity back to inventory
-        item.remaining_quantity += order.quantity
+    # Restore inventory for each item if it tracks quantity
+    for order_item in order_items:
+        item = db.query(Item).filter(Item.id == order_item.item_id).first()
+        if item and item.remaining_quantity is not None:
+            # Add the quantity back to inventory
+            item.remaining_quantity += order_item.quantity
     
     # Mark the order as cancelled
     order.payment_status = "cancelled"
@@ -215,14 +282,16 @@ def search_orders(
     if status:
         query = query.filter(Order.payment_status == status)
     
+    # Handle item name filter through OrderItem relationship
     if item_name:
-        query = query.filter(Order.item_name.ilike(f"%{item_name}%"))
+        query = query.join(OrderItem).filter(OrderItem.item_name.ilike(f"%{item_name}%"))
     
+    # Handle quantity filters through OrderItem relationship
     if min_quantity is not None:
-        query = query.filter(Order.quantity >= min_quantity)
+        query = query.join(OrderItem, isouter=True).filter(OrderItem.quantity >= min_quantity)
     
     if max_quantity is not None:
-        query = query.filter(Order.quantity <= max_quantity)
+        query = query.join(OrderItem, isouter=True).filter(OrderItem.quantity <= max_quantity)
     
     if order_date_start:
         query = query.filter(Order.order_date >= order_date_start)
@@ -239,8 +308,168 @@ def search_orders(
     # Add default sorting
     query = query.order_by(Order.order_date.desc())
     
+    # Use distinct to avoid duplicate orders due to joins
+    query = query.distinct()
+    
+    # Add eager loading for order_items
+    query = query.options(joinedload(Order.order_items))
+    
     orders = query.all()
-    return [order.to_dict() for order in orders]
+    
+    # Explicitly create OrderResponse objects with items
+    result = []
+    for order in orders:
+        items = [OrderItemResponse.model_validate(item) for item in order.order_items]
+        order_dict = OrderResponse.model_validate(order)
+        order_dict.items = items
+        result.append(order_dict)
+    
+    return result
+
+# Order item operations
+def add_item_to_order(order_id: int, item_id: int, quantity: int, db: Session = Depends(get_db)):
+    """Add a new item to an existing order"""
+    # Check if order exists and is not completed or cancelled
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order or order.payment_status != "pending":
+        return False, "Order not found or not in pending status"
+    
+    # Check if item exists
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        return False, "Item not found"
+    
+    # Check if there's enough inventory
+    if item.remaining_quantity is not None and item.remaining_quantity < quantity:
+        return False, f"Not enough stock. Only {item.remaining_quantity} available."
+    
+    # Check if item already exists in this order
+    existing_order_item = db.query(OrderItem).filter(
+        OrderItem.order_id == order_id,
+        OrderItem.item_id == item_id
+    ).first()
+    
+    if existing_order_item:
+        # Update existing order item
+        old_quantity = existing_order_item.quantity
+        existing_order_item.quantity += quantity
+        existing_order_item.subtotal = existing_order_item.quantity * existing_order_item.unit_price
+        
+        # Update order total price
+        order.total_price += quantity * item.price_per_quantity
+        
+        # Update inventory if tracked
+        if item.remaining_quantity is not None:
+            item.remaining_quantity -= quantity
+    else:
+        # Create new order item
+        subtotal = quantity * item.price_per_quantity
+        order_item = OrderItem(
+            order_id=order_id,
+            item_id=item_id,
+            item_name=item.item_name,
+            quantity=quantity,
+            unit_price=item.price_per_quantity,
+            subtotal=subtotal
+        )
+        db.add(order_item)
+        
+        # Update order total price
+        order.total_price += subtotal
+        
+        # Update inventory if tracked
+        if item.remaining_quantity is not None:
+            item.remaining_quantity -= quantity
+    
+    db.commit()
+    return True, "Item added to order"
+
+def remove_item_from_order(order_id: int, order_item_id: int, db: Session = Depends(get_db)):
+    """Remove an item from an existing order"""
+    # Check if order exists and is not completed or cancelled
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order or order.payment_status != "pending":
+        return False, "Order not found or not in pending status"
+    
+    # Check if order item exists and belongs to this order
+    order_item = db.query(OrderItem).filter(
+        OrderItem.id == order_item_id,
+        OrderItem.order_id == order_id
+    ).first()
+    
+    if not order_item:
+        return False, "Order item not found"
+    
+    # Update order total price
+    order.total_price -= order_item.subtotal
+    
+    # Restore inventory if tracked
+    item = db.query(Item).filter(Item.id == order_item.item_id).first()
+    if item and item.remaining_quantity is not None:
+        item.remaining_quantity += order_item.quantity
+    
+    # Remove the order item
+    db.delete(order_item)
+    
+    # If this was the last item, cancel the order
+    remaining_items = db.query(OrderItem).filter(OrderItem.order_id == order_id).count()
+    if remaining_items == 0:
+        db.delete(order)
+    
+    db.commit()
+    return True, "Item removed from order"
+
+def update_order_item_quantity(order_id: int, order_item_id: int, new_quantity: int, db: Session = Depends(get_db)):
+    """Update the quantity of an item in an order"""
+    # Check if order exists and is not completed or cancelled
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order or order.payment_status != "pending":
+        return False, "Order not found or not in pending status"
+    
+    # Check if order item exists and belongs to this order
+    order_item = db.query(OrderItem).filter(
+        OrderItem.id == order_item_id,
+        OrderItem.order_id == order_id
+    ).first()
+    
+    if not order_item:
+        return False, "Order item not found"
+    
+    # If new quantity is 0 or less, remove the item
+    if new_quantity <= 0:
+        return remove_item_from_order(order_id, order_item_id, db)
+    
+    # Calculate quantity difference
+    quantity_diff = new_quantity - order_item.quantity
+    
+    # Check if there's enough inventory for an increase
+    if quantity_diff > 0:
+        item = db.query(Item).filter(Item.id == order_item.item_id).first()
+        if item.remaining_quantity is not None and item.remaining_quantity < quantity_diff:
+            return False, f"Not enough stock. Only {item.remaining_quantity} additional units available."
+        
+        # Update inventory if tracked
+        if item.remaining_quantity is not None:
+            item.remaining_quantity -= quantity_diff
+    elif quantity_diff < 0:
+        # Restore inventory for a decrease
+        item = db.query(Item).filter(Item.id == order_item.item_id).first()
+        if item and item.remaining_quantity is not None:
+            item.remaining_quantity -= quantity_diff  # Negative diff, so subtract it (which adds)
+    
+    # Update order total price
+    old_subtotal = order_item.subtotal
+    order_item.quantity = new_quantity
+    order_item.subtotal = new_quantity * order_item.unit_price
+    order.total_price = order.total_price - old_subtotal + order_item.subtotal
+    
+    db.commit()
+    return True, "Order item quantity updated"
+
+def get_order_items(order_id: int, db: Session = Depends(get_db)):
+    """Get all items in an order"""
+    order_items = db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
+    return [OrderItemResponse.model_validate(item) for item in order_items]
 
 # Initialize the database when this module is imported
 init_db()

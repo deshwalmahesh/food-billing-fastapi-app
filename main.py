@@ -6,8 +6,14 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import uvicorn
 import database as db
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+# Import Pydantic schemas
+from schemas import (
+    ItemBase, ItemCreate, ItemUpdate, ItemResponse,
+    OrderBase, OrderCreate, OrderResponse,
+    OrderItemBase, OrderItemCreate, OrderItemUpdate, OrderItemResponse
+)
 
 app = FastAPI(title="Billing App")
 
@@ -16,17 +22,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Templates
 templates = Jinja2Templates(directory="templates")
-
-# Pydantic models
-class ItemCreate(BaseModel):
-    item_name: str
-    price_per_quantity: float
-    remaining_quantity: Optional[int] = None
-
-class ItemUpdate(BaseModel):
-    item_name: str
-    price_per_quantity: float
-    remaining_quantity: Optional[int] = None
+# Routes
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
@@ -69,34 +65,49 @@ async def get_orders(db_session: Session = Depends(db.get_db)):
 
 @app.post("/api/create-order")
 async def create_order(
-    item_id: int = Form(...),
-    quantity: int = Form(...),
-    payment_status: str = Form(...),
+    order: OrderCreate,
     db_session: Session = Depends(db.get_db)
 ):
-    item = db.get_item_by_id(item_id, db_session)
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
+    if not order.items:
+        raise HTTPException(status_code=400, detail="Order must contain at least one item")
     
-    if item["remaining_quantity"] is not None:
-        if item["remaining_quantity"] < quantity:
-            raise HTTPException(status_code=400, detail=f"Not enough stock. Only {item['remaining_quantity']} available.")
+    # Prepare items for the order
+    order_items = []
+    
+    for order_item in order.items:
+        item = db.get_item_by_id(order_item.item_id, db_session)
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item with ID {order_item.item_id} not found")
         
-        # Update remaining quantity
-        db.update_item_quantity(item_id, -quantity, db_session)
+        # Check inventory
+        if item.remaining_quantity is not None:
+            if item.remaining_quantity < order_item.quantity:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Not enough stock for {item.item_name}. Only {item.remaining_quantity} available."
+                )
+            
+            # Update remaining quantity
+            db.update_item_quantity(order_item.item_id, -order_item.quantity, db_session)
+        
+        # Add to order items list
+        subtotal = item.price_per_quantity * order_item.quantity
+        order_items.append({
+            "item_id": order_item.item_id,
+            "item_name": item.item_name,
+            "quantity": order_item.quantity,
+            "unit_price": item.price_per_quantity,
+            "subtotal": subtotal
+        })
     
     # Create new order
-    total_price = item["price_per_quantity"] * quantity
     order_id = db.create_order(
-        item_id=item_id,
-        item_name=item["item_name"],
-        quantity=quantity,
-        price=total_price,
-        payment_status=payment_status,
+        items=order_items,
+        payment_status=order.payment_status,
         db=db_session
     )
     
-    return RedirectResponse(url="/", status_code=303)
+    return {"order_id": order_id, "success": True}
 
 @app.post("/api/update-payment-status/{order_id}")
 async def update_payment_status(order_id: int, db_session: Session = Depends(db.get_db)):
@@ -160,15 +171,19 @@ async def search_orders(
         db=db_session
     )
     
-    # Handle sorting (since SQLite might not handle complex sorting well)
-    if sort_by and sort_by in ["id", "item_name", "quantity", "price", "order_date", "payment_date"]:
-        reverse = sort_order.lower() == "desc"
-        if sort_by in ["quantity", "price", "id"]:
-            orders = sorted(orders, key=lambda x: float(x[sort_by]) if x[sort_by] is not None else 0, reverse=reverse)
-        else:
-            orders = sorted(orders, key=lambda x: x[sort_by] if x[sort_by] is not None else "", reverse=reverse)
+    # With Pydantic models, the items are already included in the order response
+    # Convert to dict for consistency with the rest of the API
+    enhanced_orders = [order.model_dump() for order in orders]
     
-    return orders
+    # Handle sorting (since SQLite might not handle complex sorting well)
+    if sort_by and sort_by in ["id", "item_name", "quantity", "price", "order_date", "payment_date", "total_price"]:
+        reverse = sort_order.lower() == "desc"
+        if sort_by in ["quantity", "price", "id", "total_price"]:
+            enhanced_orders = sorted(enhanced_orders, key=lambda x: float(x.get(sort_by, 0)) if x.get(sort_by) is not None else 0, reverse=reverse)
+        else:
+            enhanced_orders = sorted(enhanced_orders, key=lambda x: x.get(sort_by, "") if x.get(sort_by) is not None else "", reverse=reverse)
+    
+    return enhanced_orders
 
 # Inventory Management Routes
 @app.get("/inventory", response_class=HTMLResponse)
@@ -239,6 +254,89 @@ async def delete_item(item_id: int, db_session: Session = Depends(db.get_db)):
 async def restock_all(db_session: Session = Depends(db.get_db)):
     success = db.restock_all_items(quantity=9999, db=db_session)
     return {"success": success}
+
+@app.post("/api/orders/{order_id}/items")
+async def add_item_to_order(
+    order_id: int,
+    order_item: OrderItemCreate,
+    db_session: Session = Depends(db.get_db)
+):
+    success, message = db.add_item_to_order(
+        order_id=order_id,
+        item_id=order_item.item_id,
+        quantity=order_item.quantity,
+        db=db_session
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"success": True, "message": message}
+
+@app.delete("/api/orders/{order_id}/items/{order_item_id}")
+async def remove_item_from_order(
+    order_id: int,
+    order_item_id: int,
+    db_session: Session = Depends(db.get_db)
+):
+    success, message = db.remove_item_from_order(
+        order_id=order_id,
+        order_item_id=order_item_id,
+        db=db_session
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"success": True, "message": message}
+
+@app.put("/api/orders/{order_id}/items/{order_item_id}")
+async def update_order_item(
+    order_id: int,
+    order_item_id: int,
+    order_item: OrderItemUpdate,
+    db_session: Session = Depends(db.get_db)
+):
+    success, message = db.update_order_item_quantity(
+        order_id=order_id,
+        order_item_id=order_item_id,
+        new_quantity=order_item.quantity,
+        db=db_session
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"success": True, "message": message}
+
+@app.get("/api/orders/{order_id}/items")
+async def get_order_items(
+    order_id: int,
+    db_session: Session = Depends(db.get_db)
+):
+    # Check if order exists
+    order = db.get_order_by_id(order_id, db_session)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    order_items = db.get_order_items(order_id, db_session)
+    return order_items
+
+@app.post("/api/create-order-form")
+async def create_order_form(
+    item_id: int = Form(...),
+    quantity: int = Form(...),
+    payment_status: str = Form(...),
+    db_session: Session = Depends(db.get_db)
+):
+    # Create an order with a single item (for backward compatibility with the form)
+    order = OrderCreate(
+        items=[OrderItemCreate(item_id=item_id, quantity=quantity)],
+        payment_status=payment_status
+    )
+    
+    result = await create_order(order, db_session)
+    return RedirectResponse(url="/", status_code=303)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

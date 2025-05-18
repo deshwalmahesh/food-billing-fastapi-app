@@ -134,6 +134,28 @@
                                 <p>Use the filters above to search for orders</p>
                                 <button id="quick-search-all" class="quick-search-btn">Show All Orders</button>
                             </div>
+                            <!-- Template for order cards that will be cloned by JavaScript -->
+                            <template id="order-card-template">
+                                <div class="order-card">
+                                    <div class="order-header">
+                                        <h3>Order #<span class="order-id"></span></h3>
+                                        <span class="date">Order: <span class="order-date"></span></span>
+                                    </div>
+                                    <div class="order-details">
+                                        <p>Total: ₹<span class="order-total"></span></p>
+                                        <p class="order-date-display">Order Date: <span class="order-date-full"></span></p>
+                                        <p class="status">Payment: <span class="payment-status"></span></p>
+                                        <p class="payment-date-display">Paid on: <span class="payment-date"></span></p>
+                                        
+                                        <div class="order-items-details">
+                                            <h4>Order Items:</h4>
+                                            <ul class="order-items-list">
+                                                <!-- Items will be added here dynamically -->
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </div>

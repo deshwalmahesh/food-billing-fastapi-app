@@ -37,13 +37,14 @@
                 <div class="section-header">
                     <h2>Create New Order</h2>
                 </div>
-                <form id="order-form" class="order-form">
+                <div id="order-builder" class="order-builder">
                     <div class="form-group">
                         <label for="item-select">Select Item:</label>
-                        <select id="item-select" name="item_id" required>
+                        <select id="item-select" name="item_id">
                             <option value="">-- Select Item --</option>
                             {% for item in items %}
-                            <option value="{{ item.id }}">{{ item.item_name }} - ₹{{ item.price_per_quantity }} 
+                            <option value="{{ item.id }}" data-name="{{ item.item_name }}" data-price="{{ item.price_per_quantity }}" data-stock="{{ item.remaining_quantity }}">
+                                {{ item.item_name }} - ₹{{ item.price_per_quantity }} 
                                 {% if item.remaining_quantity is defined %}
                                 ({{ item.remaining_quantity }} in stock)
                                 {% endif %}
@@ -52,32 +53,35 @@
                         </select>
                     </div>
                     
-                    <!-- Search removed from order section -->
-                    
                     <div class="form-group">
                         <label for="quantity">Quantity:</label>
                         <div class="quantity-input-container">
                             <button type="button" class="quantity-btn decrease">-</button>
-                            <input type="number" id="quantity" name="quantity" min="1" value="1" required>
+                            <input type="number" id="quantity" name="quantity" min="1" value="1">
                             <button type="button" class="quantity-btn increase">+</button>
                         </div>
                     </div>
                     
-                    <div id="price-display" class="price-display">
-                        <h3>Order Summary</h3>
-                        <p>Item: <span id="summary-item"></span></p>
-                        <p>Quantity: <span id="summary-quantity"></span></p>
-                        <p>Price per unit: ₹<span id="summary-price-per-unit"></span></p>
-                        <p class="total">Total Price: ₹<span id="summary-total-price"></span></p>
-                        
-                        <!-- Payment status is now determined by button selection -->
-                        
-                        <div class="order-buttons">
-                            <button type="submit" id="submit-order-btn" name="payment_status" value="pending" class="btn-red">Order Without Payment</button>
-                            <button type="submit" id="payment-done-btn" name="payment_status" value="completed" class="btn-green">Order With Payment</button>
+                    <button type="button" id="add-to-cart-btn" class="btn-blue">Add to Cart</button>
+                    
+                    <div id="cart-items" class="cart-items">
+                        <h3>Cart Items</h3>
+                        <div id="cart-items-list" class="cart-items-list">
+                            <!-- Cart items will be added here dynamically -->
+                            <p id="empty-cart-message">No items in cart yet.</p>
                         </div>
                     </div>
-                </form>
+                    
+                    <div id="order-summary" class="order-summary">
+                        <h3>Order Summary</h3>
+                        <p class="total">Total Price: ₹<span id="summary-total-price">0.00</span></p>
+                        
+                        <div class="order-buttons">
+                            <button type="button" id="submit-order-btn" class="btn-red">Order Without Payment</button>
+                            <button type="button" id="payment-done-btn" class="btn-green">Order With Payment</button>
+                        </div>
+                    </div>
+                </div>
             </div>
             
             <!-- History Modal -->
@@ -97,9 +101,7 @@
                                         <span class="date">Order: {{ order.order_date.split('T')[0] }} {{ order.order_date.split('T')[1].split('.')[0] }}</span>
                                     </div>
                                     <div class="order-details">
-                                        <p>Item: {{ order.item_name }}</p>
-                                        <p>Quantity: {{ order.quantity }}</p>
-                                        <p>Total: ₹{{ order.price }}</p>
+                                        <p>Total: ₹{{ order.total_price }}</p>
                                         <p class="order-date">Order Date: {{ order.order_date.split('T')[0] }} {{ order.order_date.split('T')[1].split('.')[0] }}</p>
                                         {% if order.payment_status == 'completed' %}
                                         <p class="status completed">Payment: Completed</p>
@@ -109,6 +111,21 @@
                                         {% else %}
                                         <p class="status pending">Payment: Pending</p>
                                         {% endif %}
+                                        
+                                        <div class="order-items-details">
+                                            <h4>Order Items:</h4>
+                                            <ul class="order-items-list">
+                                                {% if order.items is defined and order.items is iterable and order.items|length > 0 %}
+                                                    {% for item in order.items %}
+                                                    <li>
+                                                        {{ item.item_name }} - {{ item.quantity }} x ₹{{ item.unit_price }} = ₹{{ item.subtotal }}
+                                                    </li>
+                                                    {% endfor %}
+                                                {% else %}
+                                                    <li>No item details available</li>
+                                                {% endif %}
+                                            </ul>
+                                        </div>
                                     </div>
                                 </div>
                                 {% endfor %}
@@ -131,11 +148,25 @@
                                 <span class="date">Order: {{ order.order_date.split('T')[0] }} {{ order.order_date.split('T')[1].split('.')[0] }}</span>
                             </div>
                             <div class="order-details">
-                                <p>Item: {{ order.item_name }}</p>
-                                <p>Quantity: {{ order.quantity }}</p>
-                                <p>Total: ₹{{ order.price }}</p>
+                                <p>Total: ₹{{ order.total_price }}</p>
                                 <p class="order-date">Order Date: {{ order.order_date.split('T')[0] }} {{ order.order_date.split('T')[1].split('.')[0] }}</p>
                                 <p class="status pending">Payment: Pending</p>
+                                
+                                <div class="order-items-details">
+                                    <h4>Order Items:</h4>
+                                    <ul class="order-items-list">
+                                        {% if order.items is defined and order.items is iterable and order.items|length > 0 %}
+                                            {% for item in order.items %}
+                                            <li>
+                                                {{ item.item_name }} - {{ item.quantity }} x ₹{{ item.unit_price }} = ₹{{ item.subtotal }}
+                                            </li>
+                                            {% endfor %}
+                                        {% else %}
+                                            <li>No item details available</li>
+                                        {% endif %}
+                                    </ul>
+                                </div>
+                                
                                 <div class="order-actions">
                                     <form action="/api/update-payment-status/{{ order.id }}" method="post" class="payment-form">
                                         <button type="submit" class="mark-paid-btn">Mark as Paid</button>
