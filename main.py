@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 import uvicorn
 import database as db
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 app = FastAPI(title="Billing App")
 
@@ -29,17 +30,17 @@ class ItemUpdate(BaseModel):
 
 # Routes
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request, search: str = ""):
+async def home(request: Request, search: str = "", db_session: Session = Depends(db.get_db)):
     # Always get all orders
-    completed_orders = db.get_completed_orders()
-    pending_orders = db.get_pending_orders()
-    order_history = db.get_order_history()
+    completed_orders = db.get_completed_orders(db_session)
+    pending_orders = db.get_pending_orders(db_session)
+    order_history = db.get_order_history(db_session)
     
     # If search query is provided, filter items
     if search:
-        items = db.search_items(search)
+        items = db.search_items(search, db_session)
     else:
-        items = db.get_all_items()
+        items = db.get_all_items(db_session)
     
     return templates.TemplateResponse(
         "index.html",
@@ -54,26 +55,26 @@ async def home(request: Request, search: str = ""):
     )
 
 @app.get("/api/items", response_class=JSONResponse)
-async def get_items(search: str = Query(None)):
+async def get_items(search: str = Query(None), db_session: Session = Depends(db.get_db)):
     if search:
-        items = db.search_items(search)
+        items = db.search_items(search, db_session)
     else:
-        items = db.get_all_items()
+        items = db.get_all_items(db_session)
     return items
 
 @app.get("/api/orders", response_class=JSONResponse)
-async def get_orders():
-    orders = db.get_all_orders()
+async def get_orders(db_session: Session = Depends(db.get_db)):
+    orders = db.get_all_orders(db_session)
     return orders
-
 
 @app.post("/api/create-order")
 async def create_order(
     item_id: int = Form(...),
     quantity: int = Form(...),
-    payment_status: str = Form(...)
+    payment_status: str = Form(...),
+    db_session: Session = Depends(db.get_db)
 ):
-    item = db.get_item_by_id(item_id)
+    item = db.get_item_by_id(item_id, db_session)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     
@@ -82,7 +83,7 @@ async def create_order(
             raise HTTPException(status_code=400, detail=f"Not enough stock. Only {item['remaining_quantity']} available.")
         
         # Update remaining quantity
-        db.update_item_quantity(item_id, -quantity)
+        db.update_item_quantity(item_id, -quantity, db_session)
     
     # Create new order
     total_price = item["price_per_quantity"] * quantity
@@ -91,35 +92,36 @@ async def create_order(
         item_name=item["item_name"],
         quantity=quantity,
         price=total_price,
-        payment_status=payment_status
+        payment_status=payment_status,
+        db=db_session
     )
     
     return RedirectResponse(url="/", status_code=303)
 
 @app.post("/api/update-payment-status/{order_id}")
-async def update_payment_status(order_id: int):
-    order = db.get_order_by_id(order_id)
+async def update_payment_status(order_id: int, db_session: Session = Depends(db.get_db)):
+    order = db.get_order_by_id(order_id, db_session)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    db.update_payment_status(order_id)
+    db.update_payment_status(order_id, db=db_session)
     return RedirectResponse(url="/", status_code=303)
 
 @app.post("/api/cancel-order/{order_id}")
-async def cancel_order(order_id: int):
-    order = db.get_order_by_id(order_id)
+async def cancel_order(order_id: int, db_session: Session = Depends(db.get_db)):
+    order = db.get_order_by_id(order_id, db_session)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    success = db.cancel_order(order_id)
+    success = db.cancel_order(order_id, db_session)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to cancel order")
     
     return RedirectResponse(url="/", status_code=303)
 
 @app.get("/api/search-items")
-async def search_items(query: str = Query(...)):
-    items = db.search_items(query)
+async def search_items(query: str = Query(...), db_session: Session = Depends(db.get_db)):
+    items = db.search_items(query, db_session)
     return items
 
 @app.get("/search-orders", response_class=HTMLResponse)
@@ -142,7 +144,8 @@ async def search_orders(
     payment_date_start: Optional[str] = Query(None),
     payment_date_end: Optional[str] = Query(None),
     sort_by: Optional[str] = Query("order_date"),
-    sort_order: Optional[str] = Query("desc")
+    sort_order: Optional[str] = Query("desc"),
+    db_session: Session = Depends(db.get_db)
 ):
     # Call the database search function
     orders = db.search_orders(
@@ -153,7 +156,8 @@ async def search_orders(
         order_date_start=order_date_start,
         order_date_end=order_date_end,
         payment_date_start=payment_date_start,
-        payment_date_end=payment_date_end
+        payment_date_end=payment_date_end,
+        db=db_session
     )
     
     # Handle sorting (since SQLite might not handle complex sorting well)
@@ -168,9 +172,9 @@ async def search_orders(
 
 # Inventory Management Routes
 @app.get("/inventory", response_class=HTMLResponse)
-async def inventory_page(request: Request):
-    items = db.get_all_items()
-    order_history = db.get_order_history()
+async def inventory_page(request: Request, db_session: Session = Depends(db.get_db)):
+    items = db.get_all_items(db_session)
+    order_history = db.get_order_history(db_session)
     
     return templates.TemplateResponse(
         "inventory.html",
@@ -182,27 +186,28 @@ async def inventory_page(request: Request):
     )
 
 @app.get("/api/items/{item_id}", response_class=JSONResponse)
-async def get_item(item_id: int):
-    item = db.get_item_by_id(item_id)
+async def get_item(item_id: int, db_session: Session = Depends(db.get_db)):
+    item = db.get_item_by_id(item_id, db_session)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     return item
 
 @app.post("/api/items", response_class=JSONResponse)
-async def create_item(item: ItemCreate):
+async def create_item(item: ItemCreate, db_session: Session = Depends(db.get_db)):
     try:
         item_id = db.add_item(
             item_name=item.item_name,
             price_per_quantity=item.price_per_quantity,
-            remaining_quantity=item.remaining_quantity
+            remaining_quantity=item.remaining_quantity,
+            db=db_session
         )
         return {"id": item_id, "success": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.put("/api/items/{item_id}", response_class=JSONResponse)
-async def update_item(item_id: int, item: ItemUpdate):
-    existing_item = db.get_item_by_id(item_id)
+async def update_item(item_id: int, item: ItemUpdate, db_session: Session = Depends(db.get_db)):
+    existing_item = db.get_item_by_id(item_id, db_session)
     if not existing_item:
         raise HTTPException(status_code=404, detail="Item not found")
     
@@ -211,27 +216,28 @@ async def update_item(item_id: int, item: ItemUpdate):
             item_id=item_id,
             item_name=item.item_name,
             price_per_quantity=item.price_per_quantity,
-            remaining_quantity=item.remaining_quantity
+            remaining_quantity=item.remaining_quantity,
+            db=db_session
         )
         return {"success": success}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.delete("/api/items/{item_id}", response_class=JSONResponse)
-async def delete_item(item_id: int):
-    existing_item = db.get_item_by_id(item_id)
+async def delete_item(item_id: int, db_session: Session = Depends(db.get_db)):
+    existing_item = db.get_item_by_id(item_id, db_session)
     if not existing_item:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    success = db.delete_item(item_id)
+    success = db.delete_item(item_id, db_session)
     if not success:
         raise HTTPException(status_code=400, detail="Cannot delete item with existing orders")
     
     return {"success": True}
 
 @app.post("/api/restock-all", response_class=JSONResponse)
-async def restock_all():
-    success = db.restock_all_items(quantity=9999)
+async def restock_all(db_session: Session = Depends(db.get_db)):
+    success = db.restock_all_items(quantity=9999, db=db_session)
     return {"success": success}
 
 if __name__ == "__main__":
