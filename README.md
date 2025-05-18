@@ -4,7 +4,9 @@ A FastAPI-based application for managing food orders and billing in a restaurant
 
 ## Demo
 
-Check out the application demo: [Watch Demo Video](/static/output.mp4)
+Check out the application demo:
+file:///home/saleem-shady/Desktop/billing_app/static/output.mp4
+
 
 ## Features
 
