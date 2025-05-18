@@ -163,8 +163,8 @@ h2 {
 }
 
 .order-section {
-  flex: 1;
-  min-width: 300px;
+  flex: 0.7;
+  margin-right: 20px;
   background-color: white;
   border-radius: var(--border-radius);
   padding: 25px;
@@ -252,16 +252,16 @@ h2 {
 }
 
 .pending-orders {
-  flex: 1;
+  flex: 1.5;
   background-color: white;
   border-radius: var(--border-radius);
   padding: 25px;
   box-shadow: var(--box-shadow);
   display: flex;
   flex-direction: column;
-  min-width: 350px;
-  max-width: 450px;
-  height: fit-content;
+  min-width: 400px;
+  max-width: 550px;
+  max-height: 700px;
   overflow: hidden;
   margin-bottom: 20px;
 }
@@ -606,8 +606,27 @@ button:hover {
 
 .order-actions {
   display: flex;
-  gap: 15px;
+  gap: 10px;
   margin-top: 15px;
+  flex-wrap: wrap;
+}
+
+.modify-order-btn {
+  color: white;
+  background-color: var(--gray-dark);
+  font-size: 14px;
+  padding: 10px 15px;
+  border-radius: var(--border-radius);
+  font-weight: 500;
+  transition: background-color 0.3s, transform 0.1s;
+}
+
+.modify-order-btn:hover {
+  background-color: #333;
+}
+
+.modify-order-btn:active {
+  transform: translateY(1px);
 }
 
 .mark-paid-btn {

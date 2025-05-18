@@ -100,14 +100,24 @@ document.addEventListener('DOMContentLoaded', function() {
     cancelForms.forEach(form => {
         form.addEventListener('submit', function(e) {
             e.preventDefault();
+            const orderId = form.getAttribute('data-order-id');
             showConfirmationPopup(
                 'Cancel Order',
                 'Are you sure you want to cancel this order? This action cannot be undone.',
                 'red',
                 () => {
-                    form.submit();
+                    cancelOrder(orderId);
                 }
             );
+        });
+    });
+    
+    // Add event listeners to all modify buttons
+    const modifyButtons = document.querySelectorAll('.modify-order-btn');
+    modifyButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const orderId = button.getAttribute('data-order-id');
+            showOrderModifyModal(orderId);
         });
     });
     
@@ -471,18 +481,28 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // History modal functionality
-    historyToggle.addEventListener('click', function() {
-        historyModal.style.display = 'block';
-    });
+    if (historyToggle) {
+        historyToggle.addEventListener('click', function() {
+            // If we're not on the home page, we need to fetch the order history
+            if (!historyModal || window.location.pathname !== '/') {
+                fetchOrderHistory();
+            } else {
+                historyModal.style.display = 'block';
+            }
+        });
+    }
     
-    closeBtn.addEventListener('click', function() {
-        historyModal.style.display = 'none';
-    });
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+            historyModal.style.display = 'none';
+        });
+    }
     
     // Close modal when clicking outside of it
     window.addEventListener('click', function(event) {
-        if (event.target === historyModal) {
-            historyModal.style.display = 'none';
+        const modal = document.getElementById('history-modal');
+        if (event.target === modal) {
+            modal.style.display = 'none';
         }
     });
     
@@ -557,6 +577,480 @@ function showConfirmationPopup(title, message, color, onConfirm) {
 
     popup.appendChild(popupContent);
     popupContainer.appendChild(popup);
+}
+
+// Function to cancel an order via API
+function cancelOrder(orderId) {
+    fetch(`/api/cancel-order/${orderId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to cancel order');
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            let message = 'Order cancelled successfully.';
+            if (data.refund_needed) {
+                message += ' A refund is needed for this order.';
+            }
+            showAlert(message, 'green');
+            // Reload the page after a short delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        } else {
+            showAlert(data.message || 'Failed to cancel order', 'red');
+        }
+    })
+    .catch(error => {
+        console.error('Error cancelling order:', error);
+        showAlert('Error cancelling order. Please try again.', 'red');
+    });
+}
+
+// Function to show order modification modal
+function showOrderModifyModal(orderId) {
+    // First fetch the current order items
+    fetch(`/api/orders/${orderId}/items`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Failed to fetch order items');
+            }
+            return response.json();
+        })
+        .then(orderItems => {
+            // Create modal for modifying order
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.id = 'modify-order-modal';
+            
+            // Create modal content
+            const modalContent = document.createElement('div');
+            modalContent.className = 'modal-content';
+            
+            // Create modal header
+            const modalHeader = document.createElement('div');
+            modalHeader.className = 'modal-header';
+            modalHeader.innerHTML = `<h2>Modify Order #${orderId}</h2><span class="close">&times;</span>`;
+            
+            // Create modal body
+            const modalBody = document.createElement('div');
+            modalBody.className = 'modal-body';
+            
+            // Create form for order items
+            const form = document.createElement('form');
+            form.id = 'modify-order-form';
+            form.innerHTML = `
+                <div class="order-items-container">
+                    <h3>Current Order Items</h3>
+                    <div id="modify-items-list"></div>
+                    <button type="button" id="add-item-to-order" class="btn-green">Add Item</button>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-green">Save Changes</button>
+                    <button type="button" class="btn-gray cancel-modal">Cancel</button>
+                </div>
+            `;
+            
+            modalBody.appendChild(form);
+            modalContent.appendChild(modalHeader);
+            modalContent.appendChild(modalBody);
+            modal.appendChild(modalContent);
+            
+            // Add modal to the document
+            document.body.appendChild(modal);
+            
+            // Populate the items list
+            const itemsList = document.getElementById('modify-items-list');
+            orderItems.forEach(item => {
+                const itemRow = document.createElement('div');
+                itemRow.className = 'modify-item-row';
+                itemRow.dataset.itemId = item.item_id;
+                itemRow.innerHTML = `
+                    <div class="item-info">
+                        <span class="item-name">${item.item_name}</span>
+                        <span class="item-price">₹${item.unit_price.toFixed(2)}</span>
+                    </div>
+                    <div class="item-quantity">
+                        <button type="button" class="quantity-btn decrease">-</button>
+                        <input type="number" class="quantity-input" value="${item.quantity}" min="1" required>
+                        <button type="button" class="quantity-btn increase">+</button>
+                    </div>
+                    <button type="button" class="remove-item-btn">×</button>
+                `;
+                itemsList.appendChild(itemRow);
+                
+                // Add event listeners for quantity buttons
+                const decreaseBtn = itemRow.querySelector('.quantity-btn.decrease');
+                const increaseBtn = itemRow.querySelector('.quantity-btn.increase');
+                const quantityInput = itemRow.querySelector('.quantity-input');
+                const removeBtn = itemRow.querySelector('.remove-item-btn');
+                
+                decreaseBtn.addEventListener('click', function() {
+                    const currentValue = parseInt(quantityInput.value) || 1;
+                    if (currentValue > 1) {
+                        quantityInput.value = currentValue - 1;
+                    }
+                });
+                
+                increaseBtn.addEventListener('click', function() {
+                    const currentValue = parseInt(quantityInput.value) || 1;
+                    quantityInput.value = currentValue + 1;
+                });
+                
+                removeBtn.addEventListener('click', function() {
+                    itemRow.remove();
+                });
+            });
+            
+            // Show the modal
+            modal.style.display = 'block';
+            
+            // Add event listener to close the modal
+            const closeBtn = modal.querySelector('.close');
+            const cancelBtn = modal.querySelector('.cancel-modal');
+            
+            closeBtn.addEventListener('click', function() {
+                document.body.removeChild(modal);
+            });
+            
+            cancelBtn.addEventListener('click', function() {
+                document.body.removeChild(modal);
+            });
+            
+            // Add event listener for the add item button
+            const addItemBtn = document.getElementById('add-item-to-order');
+            addItemBtn.addEventListener('click', function() {
+                // Show a dropdown of available items
+                showAddItemDropdown(orderId, modal);
+            });
+            
+            // Add event listener for the form submission
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                modifyOrder(orderId, modal);
+            });
+        })
+        .catch(error => {
+            console.error('Error fetching order items:', error);
+            showAlert('Error fetching order items. Please try again.', 'red');
+        });
+}
+
+// Function to show add item dropdown
+function showAddItemDropdown(orderId, modal) {
+    // Fetch all available items
+    fetch('/api/items')
+        .then(response => response.json())
+        .then(items => {
+            // Create dropdown container
+            const dropdown = document.createElement('div');
+            dropdown.className = 'add-item-dropdown';
+            dropdown.innerHTML = `
+                <div class="dropdown-header">
+                    <h3>Add Item to Order</h3>
+                    <span class="close">&times;</span>
+                </div>
+                <div class="dropdown-body">
+                    <div class="search-container">
+                        <input type="text" id="item-search" placeholder="Search items...">
+                    </div>
+                    <div class="items-list scrollable"></div>
+                </div>
+            `;
+            
+            // Add dropdown to modal body
+            const modalBody = modal.querySelector('.modal-body');
+            modalBody.appendChild(dropdown);
+            
+            // Populate items list
+            const itemsList = dropdown.querySelector('.items-list');
+            items.forEach(item => {
+                const itemElement = document.createElement('div');
+                itemElement.className = 'dropdown-item';
+                itemElement.innerHTML = `
+                    <div class="item-info">
+                        <span class="item-name">${item.item_name}</span>
+                        <span class="item-price">₹${item.price_per_quantity.toFixed(2)}</span>
+                    </div>
+                    <button type="button" class="add-btn">Add</button>
+                `;
+                itemsList.appendChild(itemElement);
+                
+                // Add event listener to add button
+                const addBtn = itemElement.querySelector('.add-btn');
+                addBtn.addEventListener('click', function() {
+                    addItemToModifyForm(item, orderId);
+                    modalBody.removeChild(dropdown);
+                });
+            });
+            
+            // Add event listener to search input
+            const searchInput = dropdown.querySelector('#item-search');
+            searchInput.addEventListener('input', function() {
+                const searchValue = this.value.toLowerCase();
+                const itemElements = itemsList.querySelectorAll('.dropdown-item');
+                
+                itemElements.forEach(element => {
+                    const itemName = element.querySelector('.item-name').textContent.toLowerCase();
+                    if (itemName.includes(searchValue)) {
+                        element.style.display = 'flex';
+                    } else {
+                        element.style.display = 'none';
+                    }
+                });
+            });
+            
+            // Add event listener to close button
+            const closeBtn = dropdown.querySelector('.close');
+            closeBtn.addEventListener('click', function() {
+                modalBody.removeChild(dropdown);
+            });
+        })
+        .catch(error => {
+            console.error('Error fetching items:', error);
+            showAlert('Error fetching items. Please try again.', 'red');
+        });
+}
+
+// Function to add an item to the modify form
+function addItemToModifyForm(item, orderId) {
+    const itemsList = document.getElementById('modify-items-list');
+    
+    // Check if item already exists in the list
+    const existingItem = itemsList.querySelector(`[data-item-id="${item.id}"]`);
+    if (existingItem) {
+        // Increase quantity if item already exists
+        const quantityInput = existingItem.querySelector('.quantity-input');
+        const currentValue = parseInt(quantityInput.value) || 1;
+        quantityInput.value = currentValue + 1;
+        return;
+    }
+    
+    // Create new item row
+    const itemRow = document.createElement('div');
+    itemRow.className = 'modify-item-row';
+    itemRow.dataset.itemId = item.id;
+    itemRow.innerHTML = `
+        <div class="item-info">
+            <span class="item-name">${item.item_name}</span>
+            <span class="item-price">₹${item.price_per_quantity.toFixed(2)}</span>
+        </div>
+        <div class="item-quantity">
+            <button type="button" class="quantity-btn decrease">-</button>
+            <input type="number" class="quantity-input" value="1" min="1" required>
+            <button type="button" class="quantity-btn increase">+</button>
+        </div>
+        <button type="button" class="remove-item-btn">×</button>
+    `;
+    itemsList.appendChild(itemRow);
+    
+    // Add event listeners for quantity buttons
+    const decreaseBtn = itemRow.querySelector('.quantity-btn.decrease');
+    const increaseBtn = itemRow.querySelector('.quantity-btn.increase');
+    const quantityInput = itemRow.querySelector('.quantity-input');
+    const removeBtn = itemRow.querySelector('.remove-item-btn');
+    
+    decreaseBtn.addEventListener('click', function() {
+        const currentValue = parseInt(quantityInput.value) || 1;
+        if (currentValue > 1) {
+            quantityInput.value = currentValue - 1;
+        }
+    });
+    
+    increaseBtn.addEventListener('click', function() {
+        const currentValue = parseInt(quantityInput.value) || 1;
+        quantityInput.value = currentValue + 1;
+    });
+    
+    removeBtn.addEventListener('click', function() {
+        itemRow.remove();
+    });
+}
+
+// Function to fetch order history and display it in a modal
+function fetchOrderHistory() {
+    // Create modal if it doesn't exist
+    let historyModal = document.getElementById('history-modal');
+    if (!historyModal) {
+        historyModal = document.createElement('div');
+        historyModal.id = 'history-modal';
+        historyModal.className = 'modal';
+        
+        // Create modal content
+        historyModal.innerHTML = `
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Order History</h2>
+                    <span class="close">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <div id="history-content" class="orders-list scrollable">
+                        <p class="loading">Loading order history...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(historyModal);
+        
+        // Add event listener to close button
+        const closeBtn = historyModal.querySelector('.close');
+        closeBtn.addEventListener('click', function() {
+            historyModal.style.display = 'none';
+        });
+    }
+    
+    // Show the modal
+    historyModal.style.display = 'block';
+    
+    // Get the history content container
+    const historyContent = document.getElementById('history-content');
+    historyContent.innerHTML = '<p class="loading">Loading order history...</p>';
+    
+    // Fetch order history from API
+    fetch('/api/orders')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Failed to fetch order history');
+            }
+            return response.json();
+        })
+        .then(orders => {
+            // Sort orders by date (newest first)
+            orders.sort((a, b) => {
+                return new Date(b.order_date) - new Date(a.order_date);
+            });
+            
+            // Display orders
+            if (orders.length === 0) {
+                historyContent.innerHTML = '<p class="no-orders">No order history yet.</p>';
+                return;
+            }
+            
+            // Create HTML for orders
+            let ordersHTML = '';
+            orders.forEach(order => {
+                const orderDate = formatDate(order.order_date);
+                const paymentDate = order.payment_date ? formatDate(order.payment_date) : 'N/A';
+                
+                // Determine status class
+                let statusClass = '';
+                if (order.payment_status === 'completed') {
+                    statusClass = 'completed';
+                } else if (order.payment_status === 'pending') {
+                    statusClass = 'pending';
+                } else if (order.payment_status === 'cancelled') {
+                    statusClass = 'cancelled';
+                }
+                
+                // Create order items HTML
+                let itemsHTML = '';
+                if (order.items && order.items.length > 0) {
+                    order.items.forEach(item => {
+                        itemsHTML += `
+                            <li>
+                                ${item.item_name} - ${item.quantity} x ₹${item.unit_price.toFixed(2)} = ₹${item.subtotal.toFixed(2)}
+                            </li>
+                        `;
+                    });
+                } else {
+                    itemsHTML = '<li>No item details available</li>';
+                }
+                
+                // Create order card HTML
+                ordersHTML += `
+                    <div class="order-card">
+                        <div class="order-header">
+                            <h3>Order #${order.id}</h3>
+                            <span class="date">Order: ${orderDate}</span>
+                        </div>
+                        <div class="order-details">
+                            <p>Total: ₹${order.total_price.toFixed(2)}</p>
+                            <p class="order-date-display">Order Date: ${orderDate}</p>
+                            <p class="status ${statusClass}">Payment: ${capitalizeFirstLetter(order.payment_status)}</p>
+                            ${order.payment_status === 'completed' ? `<p class="payment-date-display">Paid on: ${paymentDate}</p>` : ''}
+                            
+                            <div class="order-items-details">
+                                <h4>Order Items:</h4>
+                                <ul class="order-items-list">
+                                    ${itemsHTML}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            historyContent.innerHTML = ordersHTML;
+        })
+        .catch(error => {
+            console.error('Error fetching order history:', error);
+            historyContent.innerHTML = '<p class="error">Error loading order history. Please try again.</p>';
+        });
+}
+
+// Function to modify an order via API
+function modifyOrder(orderId, modal) {
+    // Collect all items from the form
+    const itemRows = document.querySelectorAll('.modify-item-row');
+    const items = [];
+    
+    itemRows.forEach(row => {
+        const itemId = parseInt(row.dataset.itemId);
+        const quantity = parseInt(row.querySelector('.quantity-input').value) || 1;
+        
+        items.push({
+            item_id: itemId,
+            quantity: quantity
+        });
+    });
+    
+    // If no items, show error
+    if (items.length === 0) {
+        showAlert('Order must contain at least one item', 'red');
+        return;
+    }
+    
+    // Send request to modify order
+    fetch(`/api/modify-order/${orderId}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(items)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(data => {
+                throw new Error(data.detail || 'Failed to modify order');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            showAlert(data.message || 'Order modified successfully', 'green');
+            // Remove the modal
+            document.body.removeChild(modal);
+            // Reload the page after a short delay
+            setTimeout(() => {
+                window.location.reload();
+            }, 2000);
+        } else {
+            showAlert(data.message || 'Failed to modify order', 'red');
+        }
+    })
+    .catch(error => {
+        console.error('Error modifying order:', error);
+        showAlert(error.message || 'Error modifying order. Please try again.', 'red');
+    });
 }
 
 // Function to show alert popup

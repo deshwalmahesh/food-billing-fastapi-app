@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const filterToggle = document.getElementById('filter-toggle');
     const searchFilters = document.getElementById('search-filters');
     const quickSearchAllBtn = document.getElementById('quick-search-all');
+    const historyToggle = document.getElementById('history-toggle');
     
     // Initialize filter state
     let filtersVisible = true;
@@ -32,6 +33,140 @@ document.addEventListener('DOMContentLoaded', function() {
     
     if (quickSearchAllBtn) {
         quickSearchAllBtn.addEventListener('click', showAllOrders);
+    }
+    
+    // Add event listener for history toggle button
+    if (historyToggle) {
+        historyToggle.addEventListener('click', fetchOrderHistoryLocal);
+    }
+    
+    // Local function to fetch and display order history
+    function fetchOrderHistoryLocal() {
+        // Get or create history modal
+        let historyModal = document.getElementById('history-modal');
+        if (!historyModal) {
+            historyModal = document.createElement('div');
+            historyModal.id = 'history-modal';
+            historyModal.className = 'modal';
+            
+            // Create modal content
+            historyModal.innerHTML = `
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2>Order History</h2>
+                        <span class="close">&times;</span>
+                    </div>
+                    <div class="modal-body">
+                        <div id="history-content" class="orders-list scrollable">
+                            <p class="loading">Loading order history...</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(historyModal);
+            
+            // Add event listener to close button
+            const closeBtn = historyModal.querySelector('.close');
+            closeBtn.addEventListener('click', function() {
+                historyModal.style.display = 'none';
+            });
+            
+            // Close modal when clicking outside of it
+            window.addEventListener('click', function(event) {
+                if (event.target === historyModal) {
+                    historyModal.style.display = 'none';
+                }
+            });
+        }
+        
+        // Show the modal
+        historyModal.style.display = 'block';
+        
+        // Get the history content container
+        const historyContent = document.getElementById('history-content');
+        historyContent.innerHTML = '<p class="loading">Loading order history...</p>';
+        
+        // Fetch order history from API
+        fetch('/api/orders')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Failed to fetch order history');
+                }
+                return response.json();
+            })
+            .then(orders => {
+                // Sort orders by date (newest first)
+                orders.sort((a, b) => {
+                    return new Date(b.order_date) - new Date(a.order_date);
+                });
+                
+                // Display orders
+                if (orders.length === 0) {
+                    historyContent.innerHTML = '<p class="no-orders">No order history yet.</p>';
+                    return;
+                }
+                
+                // Create HTML for orders
+                let ordersHTML = '';
+                orders.forEach(order => {
+                    const orderDate = formatDate(order.order_date);
+                    const paymentDate = order.payment_date ? formatDate(order.payment_date) : 'N/A';
+                    
+                    // Determine status class
+                    let statusClass = '';
+                    if (order.payment_status === 'completed') {
+                        statusClass = 'completed';
+                    } else if (order.payment_status === 'pending') {
+                        statusClass = 'pending';
+                    } else if (order.payment_status === 'cancelled') {
+                        statusClass = 'cancelled';
+                    }
+                    
+                    // Create order items HTML
+                    let itemsHTML = '';
+                    if (order.items && order.items.length > 0) {
+                        order.items.forEach(item => {
+                            itemsHTML += `
+                                <li>
+                                    ${item.item_name} - ${item.quantity} x ₹${item.unit_price.toFixed(2)} = ₹${item.subtotal.toFixed(2)}
+                                </li>
+                            `;
+                        });
+                    } else {
+                        itemsHTML = '<li>No item details available</li>';
+                    }
+                    
+                    // Create order card HTML
+                    ordersHTML += `
+                        <div class="order-card">
+                            <div class="order-header">
+                                <h3>Order #${order.id}</h3>
+                                <span class="date">Order: ${orderDate}</span>
+                            </div>
+                            <div class="order-details">
+                                <p>Total: ₹${order.total_price.toFixed(2)}</p>
+                                <p class="order-date-display">Order Date: ${orderDate}</p>
+                                <p class="status ${statusClass}">Payment: ${capitalizeFirstLetter(order.payment_status)}</p>
+                                ${order.payment_status === 'completed' ? `<p class="payment-date-display">Paid on: ${paymentDate}</p>` : ''}
+                                
+                                <div class="order-items-details">
+                                    <h4>Order Items:</h4>
+                                    <ul class="order-items-list">
+                                        ${itemsHTML}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                historyContent.innerHTML = ordersHTML;
+            })
+            .catch(error => {
+                console.error('Error fetching order history:', error);
+                historyContent.innerHTML = '<p class="error">Error loading order history. Please try again.</p>';
+            });
     }
 
     // Function to handle search form submission

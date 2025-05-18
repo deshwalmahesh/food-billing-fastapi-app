@@ -124,11 +124,59 @@ async def cancel_order(order_id: int, db_session: Session = Depends(db.get_db)):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    success = db.cancel_order(order_id, db_session)
+    success, message, refund_needed = db.cancel_order(order_id, db=db_session)
     if not success:
-        raise HTTPException(status_code=400, detail="Failed to cancel order")
+        raise HTTPException(status_code=400, detail=message)
     
-    return RedirectResponse(url="/", status_code=303)
+    return {"success": True, "message": message, "refund_needed": refund_needed}
+
+@app.put("/api/modify-order/{order_id}")
+async def modify_order(order_id: int, items: List[OrderItemCreate], db_session: Session = Depends(db.get_db)):
+    order = db.get_order_by_id(order_id, db_session)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Prepare items for the order update
+    order_items = []
+    
+    for order_item in items:
+        item = db.get_item_by_id(order_item.item_id, db_session)
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Item with ID {order_item.item_id} not found")
+        
+        # Check inventory
+        if item.remaining_quantity is not None:
+            # Get current quantity in the order if it exists
+            current_order_item = next((oi for oi in order.items if oi.item_id == order_item.item_id), None)
+            current_quantity = current_order_item.quantity if current_order_item else 0
+            
+            # Calculate the net change in quantity
+            quantity_change = order_item.quantity - current_quantity
+            
+            if quantity_change > 0 and item.remaining_quantity < quantity_change:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Not enough stock for {item.item_name}. Only {item.remaining_quantity} additional available."
+                )
+            
+            # Update remaining quantity
+            db.update_item_quantity(order_item.item_id, -quantity_change, db_session)
+        
+        # Add to order items list
+        subtotal = item.price_per_quantity * order_item.quantity
+        order_items.append({
+            "item_id": order_item.item_id,
+            "item_name": item.item_name,
+            "quantity": order_item.quantity,
+            "unit_price": item.price_per_quantity,
+            "subtotal": subtotal
+        })
+    
+    success, message = db.modify_order(order_id, order_items, db=db_session)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    
+    return {"success": True, "message": message}
 
 @app.get("/api/search-items")
 async def search_items(query: str = Query(...), db_session: Session = Depends(db.get_db)):

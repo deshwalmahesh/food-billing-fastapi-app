@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Billing App</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/modify_order.css">
 </head>
 <body>
     <div class="app-container">
@@ -171,7 +172,8 @@
                                     <form action="/api/update-payment-status/{{ order.id }}" method="post" class="payment-form">
                                         <button type="submit" class="mark-paid-btn">Mark as Paid</button>
                                     </form>
-                                    <form action="/api/cancel-order/{{ order.id }}" method="post" class="cancel-form">
+                                    <button type="button" class="modify-order-btn" data-order-id="{{ order.id }}">Modify Order</button>
+                                    <form action="/api/cancel-order/{{ order.id }}" method="post" class="cancel-form" data-order-id="{{ order.id }}">
                                         <button type="submit" class="cancel-btn">Cancel Order</button>
                                     </form>
                                 </div>

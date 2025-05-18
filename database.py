@@ -244,25 +244,74 @@ def update_payment_status(order_id: int, status: str = "completed", db: Session 
 
 def cancel_order(order_id: int, db: Session = Depends(get_db)):
     """Cancel an order and restore inventory if needed"""
+    # Check if order exists
     order = db.query(Order).filter(Order.id == order_id).first()
     if not order:
-        return False
+        return False, "Order not found"
     
-    # Get all order items
+    # If order is already cancelled, do nothing
+    if order.payment_status == "cancelled":
+        return False, "Order is already cancelled"
+    
+    # Get all order items to restore inventory
     order_items = db.query(OrderItem).filter(OrderItem.order_id == order_id).all()
     
-    # Restore inventory for each item if it tracks quantity
+    # Restore inventory for each item
     for order_item in order_items:
         item = db.query(Item).filter(Item.id == order_item.item_id).first()
         if item and item.remaining_quantity is not None:
-            # Add the quantity back to inventory
             item.remaining_quantity += order_item.quantity
     
-    # Mark the order as cancelled
+    # Update order status and set payment_date to None if it was completed
+    was_paid = order.payment_status == "completed"
     order.payment_status = "cancelled"
     
+    # If the order was paid, we need to indicate a refund is needed
+    refund_needed = was_paid
+    
+    # Clear payment date if it was set
+    if was_paid:
+        order.payment_date = None
+    
     db.commit()
-    return True
+    
+    return True, "Order cancelled successfully", refund_needed
+
+def modify_order(order_id: int, items: List[Dict], db: Session = Depends(get_db)):
+    """Modify an existing order"""
+    # Check if order exists and is not completed or cancelled
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if not order or order.payment_status != "pending":
+        return False, "Order not found or not in pending status"
+    
+    # Update order items
+    for item_data in items:
+        order_item = db.query(OrderItem).filter(
+            OrderItem.order_id == order_id,
+            OrderItem.item_id == item_data["item_id"]
+        ).first()
+        
+        if order_item:
+            # Update existing order item
+            order_item.quantity = item_data["quantity"]
+            order_item.subtotal = order_item.quantity * order_item.unit_price
+        else:
+            # Create new order item
+            order_item = OrderItem(
+                order_id=order_id,
+                item_id=item_data["item_id"],
+                item_name=item_data["item_name"],
+                quantity=item_data["quantity"],
+                unit_price=item_data["unit_price"],
+                subtotal=item_data["subtotal"]
+            )
+            db.add(order_item)
+    
+    # Update order total price
+    order.total_price = sum(item.subtotal for item in order.order_items)
+    
+    db.commit()
+    return True, "Order modified successfully"
 
 def search_orders(
     status: Optional[str] = None,
@@ -273,6 +322,8 @@ def search_orders(
     order_date_end: Optional[str] = None,
     payment_date_start: Optional[str] = None,
     payment_date_end: Optional[str] = None,
+    sort_by: Optional[str] = "order_date",
+    sort_order: Optional[str] = "desc",
     db: Session = Depends(get_db)
 ):
     """Search orders with various filter criteria"""
@@ -282,31 +333,62 @@ def search_orders(
     if status:
         query = query.filter(Order.payment_status == status)
     
-    # Handle item name filter through OrderItem relationship
+    # Item name filter requires joining with OrderItem
     if item_name:
         query = query.join(OrderItem).filter(OrderItem.item_name.ilike(f"%{item_name}%"))
     
-    # Handle quantity filters through OrderItem relationship
-    if min_quantity is not None:
-        query = query.join(OrderItem, isouter=True).filter(OrderItem.quantity >= min_quantity)
+    # For quantity filters, we need to handle multiple items per order differently
+    if min_quantity or max_quantity:
+        # Only join if not already joined above
+        if not item_name:
+            query = query.join(OrderItem)
+        
+        # For min_quantity, we want orders where ANY item meets the criteria
+        if min_quantity:
+            query = query.filter(OrderItem.quantity >= min_quantity)
+        
+        # For max_quantity, we want orders where ANY item meets the criteria
+        if max_quantity:
+            query = query.filter(OrderItem.quantity <= max_quantity)
     
-    if max_quantity is not None:
-        query = query.join(OrderItem, isouter=True).filter(OrderItem.quantity <= max_quantity)
-    
+    # Date filters
     if order_date_start:
         query = query.filter(Order.order_date >= order_date_start)
     
     if order_date_end:
-        query = query.filter(Order.order_date <= order_date_end)
+        # Add 1 day to end date to include the entire day
+        query = query.filter(Order.order_date <= order_date_end + 'T23:59:59' if order_date_end else None)
     
     if payment_date_start:
         query = query.filter(Order.payment_date >= payment_date_start)
     
     if payment_date_end:
-        query = query.filter(Order.payment_date <= payment_date_end)
+        # Add 1 day to end date to include the entire day
+        query = query.filter(Order.payment_date <= payment_date_end + 'T23:59:59' if payment_date_end else None)
     
-    # Add default sorting
-    query = query.order_by(Order.order_date.desc())
+    # Sorting
+    if sort_by and sort_order:
+        if sort_by == "order_date":
+            if sort_order.lower() == "asc":
+                query = query.order_by(Order.order_date.asc())
+            else:
+                query = query.order_by(Order.order_date.desc())
+        elif sort_by == "payment_date":
+            if sort_order.lower() == "asc":
+                query = query.order_by(Order.payment_date.asc())
+            else:
+                query = query.order_by(Order.payment_date.desc())
+        elif sort_by == "total_price":
+            if sort_order.lower() == "asc":
+                query = query.order_by(Order.total_price.asc())
+            else:
+                query = query.order_by(Order.total_price.desc())
+        else:
+            # Default sort by order_date descending
+            query = query.order_by(Order.order_date.desc())
+    else:
+        # Default sort by order_date descending
+        query = query.order_by(Order.order_date.desc())
     
     # Use distinct to avoid duplicate orders due to joins
     query = query.distinct()
