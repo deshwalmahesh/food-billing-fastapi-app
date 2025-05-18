@@ -6,6 +6,7 @@
     <title>Billing App</title>
     <link rel="stylesheet" href="/static/css/styles.css">
     <link rel="stylesheet" href="/static/css/modify_order.css">
+    <link rel="stylesheet" href="/static/css/payment_calculation.css">
 </head>
 <body>
     <div class="app-container">
@@ -56,21 +57,22 @@
                     
                     <div class="form-group">
                         <label for="quantity">Quantity:</label>
-                        <div class="quantity-input-container">
-                            <button type="button" class="quantity-btn decrease">-</button>
-                            <input type="number" id="quantity" name="quantity" min="1" value="1">
-                            <button type="button" class="quantity-btn increase">+</button>
+                        <div class="input-with-button-container">
+                            <div class="quantity-input-container">
+                                <button type="button" class="quantity-btn decrease">-</button>
+                                <input type="number" id="quantity" name="quantity" min="1" value="1">
+                                <button type="button" class="quantity-btn increase">+</button>
+                            </div>
+                            <button type="button" id="add-to-cart-btn" class="btn-blue">Add to Cart</button>
                         </div>
                     </div>
-                    
-                    <button type="button" id="add-to-cart-btn" class="btn-blue">Add to Cart</button>
                     
                     <div id="cart-items" class="cart-items">
                         <h3>Cart Items</h3>
                         <div id="cart-items-list" class="cart-items-list">
                             <!-- Cart items will be added here dynamically -->
-                            <p id="empty-cart-message">No items in cart yet.</p>
                         </div>
+                        <p id="empty-cart-message">No items in cart yet.</p>
                     </div>
                     
                     <div id="order-summary" class="order-summary">
@@ -168,6 +170,10 @@
                                     </ul>
                                 </div>
                                 
+                                <div class="payment-status-display">
+                                    <p>Total Amount: ₹{{ order.total_price }}</p>
+                                </div>
+                                
                                 <div class="order-actions">
                                     <form action="/api/update-payment-status/{{ order.id }}" method="post" class="payment-form">
                                         <button type="submit" class="mark-paid-btn">Mark as Paid</button>
@@ -191,5 +197,6 @@
     </div>
     
     <script src="/static/js/script.js"></script>
+    <script src="/static/js/modify_order.js"></script>
 </body>
 </html>

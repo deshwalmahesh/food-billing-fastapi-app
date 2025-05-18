@@ -163,7 +163,7 @@ h2 {
 }
 
 .order-section {
-  flex: 0.7;
+  flex: 0.6;
   margin-right: 20px;
   background-color: white;
   border-radius: var(--border-radius);
@@ -252,23 +252,23 @@ h2 {
 }
 
 .pending-orders {
-  flex: 1.5;
+  flex: 1.2;
   background-color: white;
   border-radius: var(--border-radius);
   padding: 25px;
   box-shadow: var(--box-shadow);
   display: flex;
   flex-direction: column;
-  min-width: 400px;
-  max-width: 550px;
-  max-height: 700px;
+  min-width: 350px;
+  max-width: 500px;
+  max-height: calc(100vh - 150px);
   overflow: hidden;
   margin-bottom: 20px;
 }
 
 .scrollable {
   overflow-y: auto;
-  max-height: 400px;
+  max-height: calc(100vh - 250px);
   padding-right: 5px;
   scrollbar-width: thin;
   scrollbar-color: var(--gray) transparent;
@@ -362,6 +362,18 @@ button:hover {
 
 .cart-items-list {
   margin-top: 15px;
+  min-height: 30px; /* Ensure consistent height */
+  max-height: 250px; /* Set maximum height */
+  overflow-y: auto; /* Enable vertical scrolling */
+  padding-right: 5px; /* Add some padding for the scrollbar */
+}
+
+#empty-cart-message {
+  display: none; /* Hidden by default, will be shown by JS when needed */
+}
+
+#order-summary {
+  display: none; /* Hidden by default, will be shown by JS when there are items */
 }
 
 .cart-item {
@@ -663,10 +675,18 @@ button:hover {
   transform: translateY(1px);
 }
 
+.input-with-button-container {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 5px;
+  width: 100%;
+}
+
 .quantity-input-container {
   display: flex;
   align-items: center;
-  width: fit-content;
+  max-width: 150px;
   border: 1px solid var(--gray);
   border-radius: var(--border-radius);
   overflow: hidden;

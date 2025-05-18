@@ -124,11 +124,28 @@ async def cancel_order(order_id: int, db_session: Session = Depends(db.get_db)):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    success, message, refund_needed = db.cancel_order(order_id, db=db_session)
-    if not success:
-        raise HTTPException(status_code=400, detail=message)
+    if order.payment_status == 'cancelled':
+        raise HTTPException(status_code=400, detail="Order is already cancelled")
     
-    return {"success": True, "message": message, "refund_needed": refund_needed}
+    # Get order items before cancellation
+    order_items = db.get_order_items(order_id, db_session)
+    total_amount = order.total_price
+    
+    # Return items to inventory
+    for item in order_items:
+        db.update_item_quantity(item.item_id, item.quantity, db_session)
+    
+    # Update order status
+    db.cancel_order(order_id, db_session)
+    
+    # Prepare refund info
+    refund_needed = order.payment_status == 'completed' and total_amount > 0
+    
+    return {
+        "success": True,
+        "message": "Order cancelled successfully",
+        "refund_needed": refund_needed
+    }
 
 @app.put("/api/modify-order/{order_id}")
 async def modify_order(order_id: int, items: List[OrderItemCreate], db_session: Session = Depends(db.get_db)):
@@ -385,6 +402,48 @@ async def create_order_form(
     
     result = await create_order(order, db_session)
     return RedirectResponse(url="/", status_code=303)
+
+@app.get("/api/calculate-payment-difference/{order_id}")
+async def calculate_payment_difference(order_id: int, items: List[OrderItemCreate], db_session: Session = Depends(db.get_db)):
+    """Calculate the payment difference when modifying an order without actually modifying it."""
+    try:
+        # Get the original order
+        original_order = db.get_order_by_id(order_id, db_session)
+        if not original_order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        
+        # Calculate original total
+        original_total = original_order.total_price
+        
+        # Calculate new total
+        new_total = 0
+        for order_item in items:
+            item = db.get_item_by_id(order_item.item_id, db_session)
+            if not item:
+                raise HTTPException(status_code=404, detail=f"Item with ID {order_item.item_id} not found")
+            
+            subtotal = item.price_per_quantity * order_item.quantity
+            new_total += subtotal
+        
+        # Calculate payment difference
+        payment_difference = new_total - original_total
+        payment_message = ""
+        
+        if payment_difference > 0:
+            payment_message = f"Customer needs to pay: ₹{payment_difference:.2f}"
+        elif payment_difference < 0:
+            payment_message = f"Refund to customer: ₹{abs(payment_difference):.2f}"
+        else:
+            payment_message = "No payment adjustment needed"
+        
+        return {
+            "original_total": original_total,
+            "new_total": new_total,
+            "payment_difference": payment_difference,
+            "payment_message": payment_message
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
