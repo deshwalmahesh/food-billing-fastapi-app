@@ -1,6 +1,8 @@
 # populate gitignore for python files and fastapi apps
 *.pyc
 __pycache__
+__pycache__/*
+*/__pycache__
 
 # populate gitignore for fastapi apps
 *.env
