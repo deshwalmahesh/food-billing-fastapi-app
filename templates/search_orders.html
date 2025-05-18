@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Orders - Billing App</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/search_orders.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>Menu</h2>
+                <button id="sidebar-toggle" class="sidebar-toggle">≡</button>
+            </div>
+            <div class="sidebar-content">
+                <a href="/" class="sidebar-button">Home</a>
+                <button id="history-toggle" class="sidebar-button">Order History</button>
+                <a href="/inventory" class="sidebar-button">Inventory Management</a>
+                <a href="/search-orders" class="sidebar-button active">Search Orders</a>
+            </div>
+        </div>
+        
+        <div class="main-container">
+            <header>
+                <h1>Search Orders</h1>
+            </header>
+        
+            <div class="main-content">
+                <div class="search-orders-container">
+                    <div class="search-panel">
+                        <div class="filter-toggle-container">
+                            <button id="filter-toggle" class="filter-toggle-btn">Filters <span class="toggle-icon">▼</span></button>
+                        </div>
+                        
+                        <div class="search-form-container" id="search-filters">
+                            <form id="search-orders-form" class="search-orders-form">
+                                <div class="filters-grid">
+                                    <div class="filter-section">
+                                        <h3>Basic Filters</h3>
+                                        <div class="form-group">
+                                            <label for="status">Order Status</label>
+                                            <select id="status" name="status">
+                                                <option value="">All Statuses</option>
+                                                <option value="completed">Completed</option>
+                                                <option value="pending">Pending</option>
+                                                <option value="cancelled">Cancelled</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="item_name">Item Name</label>
+                                            <input type="text" id="item_name" name="item_name" placeholder="Search by item name">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="filter-section">
+                                        <h3>Quantity</h3>
+                                        <div class="form-group">
+                                            <label for="min_quantity">Min Quantity</label>
+                                            <input type="number" id="min_quantity" name="min_quantity" min="1" placeholder="Min">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="max_quantity">Max Quantity</label>
+                                            <input type="number" id="max_quantity" name="max_quantity" min="1" placeholder="Max">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="filter-section">
+                                        <h3>Order Date</h3>
+                                        <div class="form-group">
+                                            <label for="order_date_start">From</label>
+                                            <input type="date" id="order_date_start" name="order_date_start">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="order_date_end">To</label>
+                                            <input type="date" id="order_date_end" name="order_date_end">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="filter-section">
+                                        <h3>Payment Date</h3>
+                                        <div class="form-group">
+                                            <label for="payment_date_start">From</label>
+                                            <input type="date" id="payment_date_start" name="payment_date_start">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="payment_date_end">To</label>
+                                            <input type="date" id="payment_date_end" name="payment_date_end">
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="sort-and-actions">
+                                    <div class="sort-controls">
+                                        <div class="form-group">
+                                            <label for="sort_by">Sort By</label>
+                                            <select id="sort_by" name="sort_by">
+                                                <option value="order_date">Order Date</option>
+                                                <option value="payment_date">Payment Date</option>
+                                                <option value="id">Order ID</option>
+                                                <option value="item_name">Item Name</option>
+                                                <option value="quantity">Quantity</option>
+                                                <option value="price">Price</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="sort_order">Order</label>
+                                            <select id="sort_order" name="sort_order">
+                                                <option value="desc">Descending</option>
+                                                <option value="asc">Ascending</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-actions">
+                                        <button type="submit" class="search-btn">Search Orders</button>
+                                        <button type="button" class="reset-btn" id="reset-search">Reset</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    
+                    <div class="search-results-container">
+                        <div class="results-header">
+                            <h2>Search Results</h2>
+                            <span id="results-count"></span>
+                        </div>
+                        <div id="search-results" class="orders-list scrollable">
+                            <div class="search-prompt">
+                                <div class="search-icon">🔍</div>
+                                <p>Use the filters above to search for orders</p>
+                                <button id="quick-search-all" class="quick-search-btn">Show All Orders</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- History Modal -->
+    <div id="history-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Order History</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="history-content" class="orders-list scrollable">
+                    <p class="loading">Loading order history...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/js/script.js"></script>
+    <script src="/static/js/search_orders.js"></script>
+</body>
+</html>

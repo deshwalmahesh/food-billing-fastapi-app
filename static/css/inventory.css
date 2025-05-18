@@ -1,0 +1,154 @@
+/* Inventory Management Styles */
+.inventory-controls {
+    display: flex;
+    justify-content: flex-start;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.inventory-section {
+    background-color: #fff;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    margin-bottom: 20px;
+    padding: 25px;
+    width: 100%;
+}
+
+.inventory-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(450px, 1fr));
+    gap: 20px;
+    max-height: 650px;
+    overflow-y: auto;
+    width: 100%;
+}
+
+.item-card {
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    transition: transform 0.2s;
+    width: 100%;
+    border-left: 4px solid #4a90e2;
+}
+
+.item-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.item-details {
+    flex: 1;
+}
+
+.item-details h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    color: #333;
+    font-size: 20px;
+}
+
+.item-details p {
+    margin: 8px 0;
+    color: #555;
+    font-size: 16px;
+}
+
+.stock-count {
+    font-weight: bold;
+    color: #27ae60;
+}
+
+.item-details strong {
+    display: inline-block;
+    width: 60px;
+}
+
+.item-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.btn-blue, .btn-green, .btn-red {
+    background-color: #4a90e2;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 12px 20px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 16px;
+    font-weight: bold;
+    min-width: 150px;
+    text-align: center;
+}
+
+.btn-green {
+    background-color: #27ae60;
+}
+
+.btn-red {
+    background-color: #e74c3c;
+}
+
+.btn-blue:hover {
+    background-color: #3a7bc8;
+}
+
+.btn-green:hover {
+    background-color: #219653;
+}
+
+.btn-red:hover {
+    background-color: #c0392b;
+}
+
+.no-items {
+    grid-column: 1 / -1;
+    text-align: center;
+    color: #777;
+    padding: 20px;
+}
+
+.main-content {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Modal specific styles */
+#item-form .form-group {
+    margin-bottom: 15px;
+}
+
+#item-form label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+#item-form input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+/* Active sidebar link */
+.sidebar-button.active {
+    background-color: #4a90e2;
+    color: white;
+}
